@@ -152,10 +152,11 @@ void COverview::close(bool switchToSelection) {
             }
         }
 
-        const auto OLDWS    = MON->m_activeWorkspace;
-        const auto OTHERMON = NEWIDWS ? NEWIDWS->m_monitor.lock() : nullptr;
+        const auto OLDWS            = MON->m_activeWorkspace;
+        const auto OTHERMON         = NEWIDWS ? NEWIDWS->m_monitor.lock() : nullptr;
+        const bool crossMonitorSwap = NEWIDWS && OTHERMON && OTHERMON != MON;
 
-        if (NEWIDWS && OTHERMON && OTHERMON != MON) {
+        if (crossMonitorSwap) {
             // Config::Actions::changeWorkspaceOnCurrentMonitor resolves "current
             // monitor" via global focus state (Desktop::focusState()->monitor()),
             // NOT the monitor passed in - if focus wasn't actually on MON at this
@@ -177,7 +178,17 @@ void COverview::close(bool switchToSelection) {
         }
 
         Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
-        Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+
+        // OLDWS animates OUT only when it is genuinely being replaced. After a
+        // cross-monitor swap it is not going away at all - it has become the
+        // active, visible workspace on the other monitor, so sliding it out
+        // (which offsets it by ~a monitor width via m_renderOffset) leaves that
+        // monitor blank or visibly shifted until something resets the offset.
+        // It is arriving there, so it animates IN, on its own monitor.
+        if (crossMonitorSwap)
+            Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
+        else
+            Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
 
         startedOn = MON->m_activeWorkspace;
     }

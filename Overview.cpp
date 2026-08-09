@@ -617,24 +617,12 @@ PHLWORKSPACE captureWorkspaceTile(PHLMONITOR fallbackMonitor, COverview::SWorksp
         image.pWorkspace = PWORKSPACE;
     }
 
-    // DIAGNOSTIC (temporary): never touch a foreign monitor's render state at
-    // all - always render into fallbackMonitor's context, and treat a
-    // foreign-monitor workspace as "not found" (blank tile) rather than
-    // actually rendering its content. This is to isolate whether the
-    // continuous off-screen beginRender/renderWorkspace/recalculateMonitor
-    // calls against a live, independently-rendering foreign monitor are what
-    // corrupt it (vs. the workspace-switch call itself, already ruled out).
-    PHLMONITOR   targetMonitor = fallbackMonitor;
-    bool         isForeign     = false;
+    PHLMONITOR targetMonitor = fallbackMonitor;
     if (PWORKSPACE) {
-        if (const auto ownerMonitor = PWORKSPACE->m_monitor.lock()) {
-            if (ownerMonitor == fallbackMonitor)
-                targetMonitor = ownerMonitor;
-            else
-                isForeign = true;
-        }
+        if (const auto ownerMonitor = PWORKSPACE->m_monitor.lock())
+            targetMonitor = ownerMonitor;
     }
-    const PHLWORKSPACE renderWS = isForeign ? nullptr : PWORKSPACE;
+    const PHLWORKSPACE renderWS = PWORKSPACE;
 
     // Note: the (currently disabled, see ENABLE_LOWRES) half-resolution
     // capture mode isn't ported here - it was sized relative to the overview
