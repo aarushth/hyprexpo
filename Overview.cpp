@@ -617,11 +617,24 @@ PHLWORKSPACE captureWorkspaceTile(PHLMONITOR fallbackMonitor, COverview::SWorksp
         image.pWorkspace = PWORKSPACE;
     }
 
-    PHLMONITOR targetMonitor = fallbackMonitor;
+    // DIAGNOSTIC (temporary): never touch a foreign monitor's render state at
+    // all - always render into fallbackMonitor's context, and treat a
+    // foreign-monitor workspace as "not found" (blank tile) rather than
+    // actually rendering its content. This is to isolate whether the
+    // continuous off-screen beginRender/renderWorkspace/recalculateMonitor
+    // calls against a live, independently-rendering foreign monitor are what
+    // corrupt it (vs. the workspace-switch call itself, already ruled out).
+    PHLMONITOR   targetMonitor = fallbackMonitor;
+    bool         isForeign     = false;
     if (PWORKSPACE) {
-        if (const auto ownerMonitor = PWORKSPACE->m_monitor.lock())
-            targetMonitor = ownerMonitor;
+        if (const auto ownerMonitor = PWORKSPACE->m_monitor.lock()) {
+            if (ownerMonitor == fallbackMonitor)
+                targetMonitor = ownerMonitor;
+            else
+                isForeign = true;
+        }
     }
+    const PHLWORKSPACE renderWS = isForeign ? nullptr : PWORKSPACE;
 
     // Note: the (currently disabled, see ENABLE_LOWRES) half-resolution
     // capture mode isn't ported here - it was sized relative to the overview
@@ -654,28 +667,28 @@ PHLWORKSPACE captureWorkspaceTile(PHLMONITOR fallbackMonitor, COverview::SWorksp
     if (openSpecial)
         targetMonitor->m_activeSpecialWorkspace.reset();
 
-    if (PWORKSPACE) {
-        const auto previousWS    = activateWorkspaceForPreview(targetMonitor, PWORKSPACE);
-        const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
-        const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
+    if (renderWS) {
+        const auto previousWS    = activateWorkspaceForPreview(targetMonitor, renderWS);
+        const auto previewStates = applyExclusiveWorkspacePreviewState(renderWS);
+        const auto windowState   = renderWS == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(renderWS);
 
-        if (PWORKSPACE == startedOn)
+        if (renderWS == startedOn)
             targetMonitor->m_activeSpecialWorkspace = openSpecial;
 
         {
             CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
-            g_pHyprRenderer->renderWorkspace(targetMonitor, PWORKSPACE, Time::steadyNow(), monbox);
+            g_pHyprRenderer->renderWorkspace(targetMonitor, renderWS, Time::steadyNow(), monbox);
         }
 
         restoreWorkspaceWindowGoalState(windowState);
         restoreWorkspacePreviewStates(previewStates);
         restoreActiveWorkspaceAfterPreview(targetMonitor, previousWS);
 
-        if (PWORKSPACE == startedOn)
+        if (renderWS == startedOn)
             targetMonitor->m_activeSpecialWorkspace.reset();
     } else {
         CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
-        g_pHyprRenderer->renderWorkspace(targetMonitor, PWORKSPACE, Time::steadyNow(), monbox);
+        g_pHyprRenderer->renderWorkspace(targetMonitor, renderWS, Time::steadyNow(), monbox);
     }
 
     targetMonitor->m_activeSpecialWorkspace = openSpecial;
