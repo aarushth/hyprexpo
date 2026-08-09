@@ -196,7 +196,11 @@ void COverview::close(bool switchToSelection) {
 
         const auto OLDWS = MON->m_activeWorkspace;
 
-        const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
+        // Use changeWorkspaceOnCurrentMonitor so selecting a tile whose
+        // workspace lives on another monitor brings it to the monitor the
+        // overview was opened on, rather than just moving focus over there
+        // (matches the `on_current_monitor` workspace dispatch flag).
+        const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspaceOnCurrentMonitor(NEWIDWS);
         if (!CHANGE)
             Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
 
