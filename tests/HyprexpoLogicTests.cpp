@@ -33,15 +33,25 @@ int main() {
     expect(trimString("  DP-1 first 1 \t") == "DP-1 first 1", "trimString removes surrounding whitespace");
     expect(splitCommaList("a, b,,c").size() == 4, "splitCommaList preserves empty entries");
 
-    expect(clampGridColumns(-1) == 1, "columns clamp lower bound");
-    expect(clampGridColumns(3) == 3, "columns keep valid value");
-    expect(clampGridColumns(99) == 7, "columns clamp upper bound");
+    expect(computeSquareGridSideLength(0) == 2, "grid side length has a floor of 2 for zero workspaces");
+    expect(computeSquareGridSideLength(1) == 2, "grid side length has a floor of 2 for one workspace");
+    expect(computeSquareGridSideLength(2) == 2, "grid side length for two workspaces");
+    expect(computeSquareGridSideLength(3) == 2, "grid side length for three workspaces");
+    expect(computeSquareGridSideLength(4) == 2, "grid side length for four workspaces");
+    expect(computeSquareGridSideLength(5) == 3, "grid side length for five workspaces");
+    expect(computeSquareGridSideLength(9) == 3, "grid side length for nine workspaces");
+    expect(computeSquareGridSideLength(10) == 4, "grid side length for ten workspaces");
+    expect(computeSquareGridSideLength(16) == 4, "grid side length for sixteen workspaces");
+    expect(computeSquareGridSideLength(17) == 5, "grid side length for seventeen workspaces");
+
     expect(HyprexpoConfig::SHOW_PINNED_WINDOWS_DEFAULT == 0, "pinned windows are hidden from previews by default");
 
     expect(tileIndexFromPoint(0, 0, 300, 300, 3) == 0, "tile index top-left");
     expect(tileIndexFromPoint(299, 299, 300, 300, 3) == 8, "tile index bottom-right inside");
     expect(tileIndexFromPoint(300, 300, 300, 300, 3) == 8, "tile index clamps monitor edge");
     expect(tileIndexFromPoint(10, 10, 0, 300, 3) == -1, "tile index rejects invalid width");
+    expect(tileIndexFromPoint(0, 0, 300, 300, 10) == 0, "tile index works past the old columns cap");
+    expect(tileIndexFromPoint(299, 299, 300, 300, 10) == 99, "tile index bottom-right past the old columns cap");
 
     SDropIntentInput dropInput{
         .targetValid     = true,
@@ -93,16 +103,6 @@ int main() {
     expect(near(gradient.angleDeg, 45.F), "gradient angle parses");
     expect(!parseGradientSpec("rgba(33ccffee) nope 45deg").valid, "invalid gradient rejected");
     expect(isGradientBorderSpec("rgba(33ccffee) rgba(00ff99ee) 45deg"), "gradient border detected");
-
-    auto method = parseWorkspaceMethodSpec("center current");
-    expect(method.valid && method.mode == EWorkspaceMethodMode::Center && method.workspace == "current", "global center method parses");
-    method = parseWorkspaceMethodSpec("first 9");
-    expect(method.valid && method.mode == EWorkspaceMethodMode::First && method.workspace == "9", "first method parses");
-    expect(!parseWorkspaceMethodSpec("middle 9").valid, "invalid workspace method rejected");
-    method = resolveWorkspaceMethodForMonitor("DP-1 first 1, HDMI-A-1 center 9, center current", "HDMI-A-1");
-    expect(method.valid && method.mode == EWorkspaceMethodMode::Center && method.workspace == "9", "per-monitor method wins");
-    method = resolveWorkspaceMethodForMonitor("DP-1 first 1, center current", "eDP-1");
-    expect(method.valid && method.mode == EWorkspaceMethodMode::Center && method.workspace == "current", "global fallback method applies");
 
     if (failures != 0)
         return 1;

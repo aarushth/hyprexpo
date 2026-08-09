@@ -20,18 +20,6 @@ struct SGradientSpec {
     bool       valid    = false;
 };
 
-enum class EWorkspaceMethodMode {
-    Center,
-    First,
-};
-
-struct SWorkspaceMethodSpec {
-    bool                 valid = false;
-    EWorkspaceMethodMode mode  = EWorkspaceMethodMode::Center;
-    std::string          workspace;
-    std::string          error;
-};
-
 struct SPoint {
     double x = 0.0;
     double y = 0.0;
@@ -69,7 +57,7 @@ std::string              trimString(std::string value);
 std::string              lowerString(std::string value);
 std::vector<std::string> splitCommaList(const std::string& value);
 
-int                      clampGridColumns(int columns);
+int                      computeSquareGridSideLength(size_t workspaceCount);
 int                      tileIndexFromPoint(double x, double y, double width, double height, int sideLength);
 SDropIntentGeometry      computeDropIntentGeometry(const SDropIntentInput& input);
 
@@ -80,8 +68,5 @@ bool                     parseHexRGBA8(const std::string& value, SColorRGBA& out
 bool                     parseSolidColorSpec(const std::string& value, SColorRGBA& out);
 SGradientSpec            parseGradientSpec(const std::string& value);
 bool                     isGradientBorderSpec(const std::string& value);
-
-SWorkspaceMethodSpec     parseWorkspaceMethodSpec(const std::string& method);
-SWorkspaceMethodSpec     resolveWorkspaceMethodForMonitor(const std::string& config, const std::string& monitorName);
 
 }

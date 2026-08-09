@@ -80,3 +80,4 @@ void restoreWorkspaceWindowGoalState(const std::vector<SWindowPreviewState>& sta
 PHLWORKSPACE activateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
 void restoreActiveWorkspaceAfterPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
 void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr);
+PHLWORKSPACE captureWorkspaceTile(PHLMONITOR renderMonitor, COverview::SWorkspaceImage& image, const PHLWORKSPACE& startedOn, const CBox& monbox);

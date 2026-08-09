@@ -15,16 +15,8 @@ static void addConfigValue(SP<Config::Values::IValue> value) {
 }
 
 void registerHyprexpoConfigValues() {
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:columns", "columns", HyprexpoConfig::COLUMNS_DEFAULT));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gaps_in", "inner gaps", HyprexpoConfig::GAPS_IN_DEFAULT));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:bg_col", "background color", HyprexpoConfig::BG_COL_DEFAULT));
-    // Supports both global and per-monitor formats:
-    // Global: "center current" or "first 1"
-    // Per-monitor with comma delimiter: "DP-1 first 1, HDMI-1 center current"
-    // Mixed: "DP-1 first 1, center current" (DP-1 uses first 1, others use center current)
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:workspace_method", "workspace method", HyprexpoConfig::WORKSPACE_METHOD_DEFAULT));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:skip_empty", "skip empty workspaces", HyprexpoConfig::SKIP_EMPTY_DEFAULT));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:max_workspace", "maximum sequential workspace", HyprexpoConfig::MAX_WORKSPACE_DEFAULT));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:show_workspace_numbers", "force workspace ID labels", HyprexpoConfig::SHOW_WORKSPACE_NUMBERS_DEFAULT));
 
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gesture_distance", "gesture distance", HyprexpoConfig::GESTURE_DISTANCE_DEFAULT));

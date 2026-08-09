@@ -71,50 +71,11 @@ void COverview::redrawID(int id, bool forcelowres) {
 
     clearWithColor(CHyprColor{0, 0, 0, 1.0});
 
-    PHLWORKSPACE PWORKSPACE;
-    if (image.pWorkspace) {
-        PWORKSPACE = image.pWorkspace;
-    }
-    else {
-        for (const auto& w : State::workspaceState()->workspacesCopy()) {
-            if (w->m_id == image.workspaceID) {
-                PWORKSPACE = w;
-                break;
-            }
-        }
-    }
-    image.pWorkspace      = PWORKSPACE;
-
-    const auto   restoreWorkspace = MON->m_activeWorkspace;
-    PHLWORKSPACE openSpecial      = MON->m_activeSpecialWorkspace;
-    if (openSpecial)
-        MON->m_activeSpecialWorkspace.reset();
+    const auto restoreWorkspace = MON->m_activeWorkspace;
 
     startedOn->m_visible = false;
 
-    if (PWORKSPACE) {
-        const auto previousWS    = activateWorkspaceForPreview(MON, PWORKSPACE);
-        const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
-        const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
-
-        if (PWORKSPACE == startedOn)
-            MON->m_activeSpecialWorkspace = openSpecial;
-
-        {
-            CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
-            g_pHyprRenderer->renderWorkspace(MON, PWORKSPACE, Time::steadyNow(), monbox);
-        }
-
-        restoreWorkspaceWindowGoalState(windowState);
-        restoreWorkspacePreviewStates(previewStates);
-        restoreActiveWorkspaceAfterPreview(MON, previousWS);
-
-        if (PWORKSPACE == startedOn)
-            MON->m_activeSpecialWorkspace.reset();
-    } else {
-        CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
-        g_pHyprRenderer->renderWorkspace(MON, PWORKSPACE, Time::steadyNow(), monbox);
-    }
+    captureWorkspaceTile(MON, image, startedOn, monbox);
 
     g_pHyprRenderer->m_renderData.blockScreenShader = true;
     g_pHyprRenderer->endRender();
@@ -127,8 +88,6 @@ void COverview::redrawID(int id, bool forcelowres) {
     // Capture normalizes rotated monitor geometry; Hyprland's output path adds one more half-turn.
     if (const auto texture = image.fb->getTexture(); texture)
         texture->m_transform = isTransformRotated(savedTransform) ? HYPRUTILS_TRANSFORM_180 : HYPRUTILS_TRANSFORM_NORMAL;
-
-    MON->m_activeSpecialWorkspace = openSpecial;
 
     const auto activeWorkspace = restoreWorkspace ? restoreWorkspace : startedOn;
     MON->m_activeWorkspace = activeWorkspace;
@@ -267,6 +226,10 @@ void COverview::onWorkspaceChange() {
     else
         startedOn = MON->m_activeWorkspace;
 
+    // Every monitor's active workspace is guaranteed present in images[] by
+    // construction (see the ctor), so this should always find a match. If it
+    // doesn't (e.g. an out-of-band workspace switch to an ID that didn't
+    // exist when the overview opened), openedID keeps its previous value.
     for (size_t i = 0; i < (size_t)(SIDE_LENGTH * SIDE_LENGTH); ++i) {
         if (images[i].workspaceID != MON->activeWorkspaceID())
             continue;

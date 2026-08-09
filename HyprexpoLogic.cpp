@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <cmath>
 
 namespace Hyprexpo {
 
@@ -40,15 +41,21 @@ std::vector<std::string> splitCommaList(const std::string& value) {
     return entries;
 }
 
-int clampGridColumns(int columns) {
-    return std::clamp(columns, HyprexpoConfig::COLUMNS_MIN, HyprexpoConfig::COLUMNS_MAX);
+namespace {
+int clampSideLength(int sideLength) {
+    return std::max(1, sideLength);
+}
+}
+
+int computeSquareGridSideLength(size_t workspaceCount) {
+    return std::max(2, (int)std::ceil(std::sqrt((double)workspaceCount)));
 }
 
 int tileIndexFromPoint(double x, double y, double width, double height, int sideLength) {
     if (width <= 0 || height <= 0 || sideLength <= 0)
         return -1;
 
-    const int safeSide = clampGridColumns(sideLength);
+    const int safeSide = clampSideLength(sideLength);
     const int hx       = std::clamp(static_cast<int>(x / width * safeSide), 0, safeSide - 1);
     const int hy       = std::clamp(static_cast<int>(y / height * safeSide), 0, safeSide - 1);
     return hx + hy * safeSide;
@@ -224,82 +231,6 @@ SGradientSpec parseGradientSpec(const std::string& value) {
 bool isGradientBorderSpec(const std::string& value) {
     const auto first = value.find("rgba(");
     return first != std::string::npos && value.find("rgba(", first + 1) != std::string::npos;
-}
-
-static std::vector<std::string> splitWhitespace(const std::string& value) {
-    std::vector<std::string> tokens;
-    size_t                   cursor = 0;
-
-    while (cursor < value.size()) {
-        while (cursor < value.size() && std::isspace(static_cast<unsigned char>(value[cursor])))
-            ++cursor;
-        const size_t begin = cursor;
-        while (cursor < value.size() && !std::isspace(static_cast<unsigned char>(value[cursor])))
-            ++cursor;
-        if (begin < cursor)
-            tokens.push_back(value.substr(begin, cursor - begin));
-    }
-
-    return tokens;
-}
-
-SWorkspaceMethodSpec parseWorkspaceMethodSpec(const std::string& method) {
-    SWorkspaceMethodSpec spec;
-    const auto           tokens = splitWhitespace(method);
-
-    if (tokens.size() != 2) {
-        spec.error = "expected '<center|first> <workspace>'";
-        return spec;
-    }
-
-    const auto mode = lowerString(tokens[0]);
-    if (mode == "center")
-        spec.mode = EWorkspaceMethodMode::Center;
-    else if (mode == "first")
-        spec.mode = EWorkspaceMethodMode::First;
-    else {
-        spec.error = "expected workspace method 'center' or 'first'";
-        return spec;
-    }
-
-    if (tokens[1].empty()) {
-        spec.error = "workspace token cannot be empty";
-        return spec;
-    }
-
-    spec.workspace = tokens[1];
-    spec.valid     = true;
-    return spec;
-}
-
-SWorkspaceMethodSpec resolveWorkspaceMethodForMonitor(const std::string& config, const std::string& monitorName) {
-    const std::string trimmed = trimString(config);
-    if (trimmed.empty())
-        return parseWorkspaceMethodSpec(HyprexpoConfig::WORKSPACE_METHOD_DEFAULT);
-
-    std::string globalFallback;
-    for (const auto& entry : splitCommaList(trimmed)) {
-        if (entry.empty())
-            continue;
-
-        const auto tokens = splitWhitespace(entry);
-        if (tokens.size() == 3) {
-            if (tokens[0] == monitorName)
-                return parseWorkspaceMethodSpec(tokens[1] + " " + tokens[2]);
-            continue;
-        }
-
-        if (tokens.size() == 2 && globalFallback.empty())
-            globalFallback = entry;
-    }
-
-    if (!globalFallback.empty())
-        return parseWorkspaceMethodSpec(globalFallback);
-
-    auto invalid = parseWorkspaceMethodSpec(trimmed);
-    if (!invalid.valid && invalid.error.empty())
-        invalid.error = "invalid workspace method config";
-    return invalid;
 }
 
 }

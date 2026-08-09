@@ -47,7 +47,6 @@ using namespace std::chrono_literals;
 namespace CompatHyprlandAPI {
 static bool isStringConfig(const std::string& name) {
     static const std::map<std::string, bool> STRING_CONFIGS = {
-        {"plugin:hyprexpo:workspace_method", true},
         {"plugin:hyprexpo:border_color", true},
         {"plugin:hyprexpo:border_color_current", true},
         {"plugin:hyprexpo:border_color_focus", true},
@@ -80,7 +79,6 @@ static bool isFloatConfig(const std::string& name) {
 
 static Config::STRING stringDefault(const std::string& name) {
     static const std::map<std::string, Config::STRING> DEFAULTS = {
-        {"plugin:hyprexpo:workspace_method", HyprexpoConfig::WORKSPACE_METHOD_DEFAULT},
         {"plugin:hyprexpo:border_color", HyprexpoConfig::BORDER_COLOR_DEFAULT},
         {"plugin:hyprexpo:border_color_current", HyprexpoConfig::BORDER_COLOR_CURRENT_DEFAULT},
         {"plugin:hyprexpo:border_color_focus", HyprexpoConfig::BORDER_COLOR_FOCUS_DEFAULT},
@@ -119,13 +117,11 @@ static Config::FLOAT floatDefault(const std::string& name) {
 
 static Config::INTEGER intDefault(const std::string& name) {
     static const std::map<std::string, Config::INTEGER> DEFAULTS = {
-        {"plugin:hyprexpo:columns", HyprexpoConfig::COLUMNS_DEFAULT},
         {"plugin:hyprexpo:gaps_in", HyprexpoConfig::GAPS_IN_DEFAULT},
         {"plugin:hyprexpo:bg_col", HyprexpoConfig::BG_COL_DEFAULT},
         {"plugin:hyprexpo:gesture_distance", HyprexpoConfig::GESTURE_DISTANCE_DEFAULT},
         {"plugin:hyprexpo:show_cursor", HyprexpoConfig::SHOW_CURSOR_DEFAULT},
         {"plugin:hyprexpo:show_pinned_windows", HyprexpoConfig::SHOW_PINNED_WINDOWS_DEFAULT},
-        {"plugin:hyprexpo:max_workspace", HyprexpoConfig::MAX_WORKSPACE_DEFAULT},
         {"plugin:hyprexpo:show_workspace_numbers", HyprexpoConfig::SHOW_WORKSPACE_NUMBERS_DEFAULT},
         {"plugin:hyprexpo:workspace_number_color", HyprexpoConfig::WORKSPACE_NUMBER_COLOR_DEFAULT},
         {"plugin:hyprexpo:keynav_enable", HyprexpoConfig::KEYNAV_ENABLE_DEFAULT},
@@ -597,6 +593,96 @@ void restoreActiveWorkspaceAfterPreview(PHLMONITOR monitor, const PHLWORKSPACE& 
     recalculateWorkspaceLayout(workspace);
 }
 
+// Overview tiles can now preview a workspace that natively belongs to a
+// different monitor than the one doing the rendering (multi-monitor grid).
+// activateWorkspaceForPreview()/recalculateMonitor() key off m_monitor on
+// both the workspace and its windows to resolve layout/position, so those
+// must temporarily agree with the render monitor for the borrow to produce
+// correct geometry; restored immediately after the render below.
+struct SForeignMonitorGuard {
+    PHLWORKSPACE                                     workspace;
+    PHLMONITORREF                                    savedWorkspaceMonitor;
+    std::vector<std::pair<PHLWINDOW, PHLMONITORREF>> savedWindowMonitors;
+};
+
+static SForeignMonitorGuard applyForeignMonitorRenderContext(PHLMONITOR renderMonitor, const PHLWORKSPACE& workspace) {
+    SForeignMonitorGuard guard;
+    if (!workspace)
+        return guard;
+
+    guard.workspace             = workspace;
+    guard.savedWorkspaceMonitor = workspace->m_monitor;
+    workspace->m_monitor        = renderMonitor;
+
+    for (const auto& window : Desktop::windowState()->windows()) {
+        if (!window || window->m_workspace != workspace || !window->m_isMapped)
+            continue;
+
+        guard.savedWindowMonitors.push_back({window, window->m_monitor});
+        window->m_monitor = renderMonitor;
+    }
+
+    return guard;
+}
+
+static void restoreForeignMonitorRenderContext(const SForeignMonitorGuard& guard) {
+    if (!guard.workspace)
+        return;
+
+    for (const auto& [window, savedMonitor] : guard.savedWindowMonitors)
+        if (window)
+            window->m_monitor = savedMonitor;
+
+    guard.workspace->m_monitor = guard.savedWorkspaceMonitor;
+}
+
+PHLWORKSPACE captureWorkspaceTile(PHLMONITOR renderMonitor, COverview::SWorkspaceImage& image, const PHLWORKSPACE& startedOn, const CBox& monbox) {
+    PHLWORKSPACE PWORKSPACE = image.pWorkspace;
+    if (!PWORKSPACE) {
+        for (const auto& w : State::workspaceState()->workspacesCopy()) {
+            if (w->m_id == image.workspaceID) {
+                PWORKSPACE = w;
+                break;
+            }
+        }
+        image.pWorkspace = PWORKSPACE;
+    }
+
+    PHLWORKSPACE openSpecial = renderMonitor->m_activeSpecialWorkspace;
+    if (openSpecial)
+        renderMonitor->m_activeSpecialWorkspace.reset();
+
+    if (PWORKSPACE) {
+        const auto guard         = applyForeignMonitorRenderContext(renderMonitor, PWORKSPACE);
+        const auto previousWS    = activateWorkspaceForPreview(renderMonitor, PWORKSPACE);
+        const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
+        const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
+
+        if (PWORKSPACE == startedOn)
+            renderMonitor->m_activeSpecialWorkspace = openSpecial;
+
+        {
+            CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
+            g_pHyprRenderer->renderWorkspace(renderMonitor, PWORKSPACE, Time::steadyNow(), monbox);
+        }
+
+        restoreWorkspaceWindowGoalState(windowState);
+        restoreWorkspacePreviewStates(previewStates);
+        restoreActiveWorkspaceAfterPreview(renderMonitor, previousWS);
+        restoreForeignMonitorRenderContext(guard);
+
+        if (PWORKSPACE == startedOn)
+            renderMonitor->m_activeSpecialWorkspace.reset();
+    } else {
+        CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
+        g_pHyprRenderer->renderWorkspace(renderMonitor, PWORKSPACE, Time::steadyNow(), monbox);
+    }
+
+    renderMonitor->m_activeSpecialWorkspace = openSpecial;
+
+    return PWORKSPACE;
+}
+
 void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
     if (!g_pOverview)
         return;
@@ -629,31 +715,6 @@ static void ensureOverviewCursorVisible(bool forceOverviewShape = false, bool re
         g_pInputManager->simulateMouseMovement();
 }
 
-// Get workspace method configuration for a specific monitor
-// Returns pair of {isCenter, startWorkspaceID}
-static std::pair<bool, int> getWorkspaceMethodForMonitor(PHLMONITOR monitor) {
-    static auto const* PMETHOD = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:workspace_method")->getDataStaticPtr();
-
-    const std::string monitorName = monitor->m_name;
-    const std::string configStr = std::string{*PMETHOD};
-    const auto        parsed = Hyprexpo::resolveWorkspaceMethodForMonitor(configStr, monitorName);
-
-    int methodStartID = monitor->activeWorkspaceID();
-    if (!parsed.valid) {
-        Log::logger->log(Log::ERR, "[hyprexpo] invalid workspace_method for monitor {}: {} ({})", monitorName, configStr, parsed.error);
-        return {true, methodStartID};
-    }
-
-    const bool methodCenter = parsed.mode == Hyprexpo::EWorkspaceMethodMode::Center;
-    if (parsed.workspace != "current") {
-        methodStartID = getWorkspaceIDNameFromString(parsed.workspace).id;
-        if (methodStartID == WORKSPACE_INVALID)
-            methodStartID = monitor->activeWorkspaceID();
-    }
-
-    return {methodCenter, methodStartID};
-}
-
 COverview::~COverview() {
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
     images.clear(); // otherwise we get a vram leak
@@ -670,104 +731,41 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     const auto PMONITOR = State::monitorState()->query().vec(g_pInputManager->getMouseCoordsInternal()).run();
     pMonitor            = PMONITOR;
 
-    static auto* const* PCOLUMNS = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:columns")->getDataStaticPtr();
     static auto* const* PGAPS    = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:gaps_in")->getDataStaticPtr();
     static auto* const* PCOL     = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:bg_col")->getDataStaticPtr();
-    static auto* const* PSKIP    = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:skip_empty")->getDataStaticPtr();
-    static auto* const* PMAXWS   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:max_workspace")->getDataStaticPtr();
     static auto* const* PSHOWNUM = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:show_workspace_numbers")->getDataStaticPtr();
 
-    SIDE_LENGTH          = Hyprexpo::clampGridColumns(**PCOLUMNS);
     GAP_WIDTH            = std::max<Hyprlang::INT>(0, **PGAPS);
     BG_COLOR             = **PCOL;
     showWorkspaceNumbers = **PSHOWNUM;
 
-    // Get workspace method for this specific monitor
-    auto [methodCenter, methodStartID] = getWorkspaceMethodForMonitor(pMonitor.lock());
+    // Gather every monitor's active workspace ID, so those workspaces are
+    // always shown even if currently empty (you never lose "where you are").
+    std::vector<int64_t> activeIDs;
+    for (const auto& mon : State::monitorState()->monitors()) {
+        if (mon && mon->m_activeWorkspace)
+            activeIDs.push_back(mon->activeWorkspaceID());
+    }
 
+    // Show every non-special workspace across all monitors that either has
+    // windows or is some monitor's active workspace, ordered by ID.
+    std::vector<PHLWORKSPACE> visible;
+    for (const auto& w : State::workspaceState()->workspacesCopy()) {
+        if (!w || w->m_isSpecialWorkspace)
+            continue;
+
+        const bool activeSomewhere = std::find(activeIDs.begin(), activeIDs.end(), w->m_id) != activeIDs.end();
+        if (w->getWindowCount() > 0 || activeSomewhere)
+            visible.push_back(w);
+    }
+    std::sort(visible.begin(), visible.end(), [](const PHLWORKSPACE& a, const PHLWORKSPACE& b) { return a->m_id < b->m_id; });
+
+    SIDE_LENGTH = Hyprexpo::computeSquareGridSideLength(visible.size());
     images.resize(SIDE_LENGTH * SIDE_LENGTH);
 
-    // r includes empty workspaces; m skips over them
-    const bool    skipEmpty    = **PSKIP;
-    const int64_t maxWorkspace = std::max<Hyprlang::INT>(0, **PMAXWS);
-    std::string   selector     = skipEmpty ? "m" : "r";
-
-    if (!skipEmpty && maxWorkspace > 0) {
-        const int64_t tileCount = SIDE_LENGTH * SIDE_LENGTH;
-        const int64_t maxStart  = std::max<int64_t>(1, maxWorkspace - tileCount + 1);
-        const int64_t startID   = methodCenter ? std::clamp<int64_t>(methodStartID - tileCount / 2, 1, maxStart) : std::clamp<int64_t>(methodStartID, 1, maxStart);
-
-        for (size_t i = 0; i < images.size(); ++i) {
-            const int64_t workspaceID = startID + i;
-            images[i].workspaceID     = workspaceID <= maxWorkspace ? workspaceID : WORKSPACE_INVALID;
-        }
-    } else if (methodCenter) {
-        int currentID = methodStartID;
-        int firstID   = currentID;
-
-        int backtracked = 0;
-
-        // Initialize tiles to WORKSPACE_INVALID; cliking one of these results
-        // in changing to "emptynm" (next empty workspace). Tiles with this id
-        // will only remain if skip_empty is on.
-        for (size_t i = 0; i < images.size(); i++) {
-            images[i].workspaceID = WORKSPACE_INVALID;
-        }
-
-        // Scan through workspaces lower than methodStartID until we wrap; count how many
-        for (size_t i = 1; i < images.size() / 2; ++i) {
-            currentID = getWorkspaceIDNameFromString(selector + "-" + std::to_string(i)).id;
-            if (currentID >= firstID)
-                break;
-
-            backtracked++;
-            firstID = currentID;
-        }
-
-        // Scan through workspaces higher than methodStartID. If using "m"
-        // (skip_empty), stop when we wrap, leaving the rest of the workspace
-        // ID's set to WORKSPACE_INVALID
-        for (size_t i = 0; i < (size_t)(SIDE_LENGTH * SIDE_LENGTH); ++i) {
-            auto& image = images[i];
-            if ((int64_t)i - backtracked < 0) {
-                currentID = getWorkspaceIDNameFromString(selector + std::to_string((int64_t)i - backtracked)).id;
-            } else {
-                currentID = getWorkspaceIDNameFromString(selector + "+" + std::to_string((int64_t)i - backtracked)).id;
-                if (i > 0 && currentID <= firstID)
-                    break;
-            }
-            image.workspaceID = currentID;
-        }
-
-    } else {
-        int currentID         = methodStartID;
-        images[0].workspaceID = currentID;
-
-        PHLWORKSPACE PWORKSPACESTART;
-        for (const auto& w : State::workspaceState()->workspacesCopy()) {
-            if (w->m_id == currentID) {
-                PWORKSPACESTART = w;
-                break;
-            }
-        }
-        if (!PWORKSPACESTART)
-            PWORKSPACESTART = CWorkspace::create(currentID, pMonitor.lock(), std::to_string(currentID));
-
-        pMonitor->m_activeWorkspace = PWORKSPACESTART;
-
-        // Scan through workspaces higher than methodStartID. If using "m"
-        // (skip_empty), stop when we wrap, leaving the rest of the workspace
-        // ID's set to WORKSPACE_INVALID
-        for (size_t i = 1; i < (size_t)(SIDE_LENGTH * SIDE_LENGTH); ++i) {
-            auto& image = images[i];
-            currentID   = getWorkspaceIDNameFromString(selector + "+" + std::to_string(i)).id;
-            if (currentID <= methodStartID)
-                break;
-            image.workspaceID = currentID;
-        }
-
-        pMonitor->m_activeWorkspace = startedOn;
-    }
+    for (size_t i = 0; i < visible.size(); ++i)
+        images[i].workspaceID = visible[i]->m_id;
+    // remaining images[] entries keep their default WORKSPACE_INVALID (padding tiles)
 
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
 
@@ -800,10 +798,9 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         pMonitor->m_transformedSize = {monbox.w, monbox.h};
     }
 
-    PHLWORKSPACE openSpecial = PMONITOR->m_activeSpecialWorkspace;
-    if (openSpecial)
-        PMONITOR->m_activeSpecialWorkspace.reset();
-
+    // captureWorkspaceTile() strips/restores PMONITOR->m_activeSpecialWorkspace
+    // per tile (only the startedOn tile briefly shows it), so no outer
+    // strip/restore is needed here.
     g_pHyprRenderer->m_bBlockSurfaceFeedback = true;
     settleWorkspaceMoveAnimations();
 
@@ -818,42 +815,11 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
         clearWithColor(CHyprColor{0, 0, 0, 1.0});
 
-        PHLWORKSPACE PWORKSPACE;
-        for (const auto& w : State::workspaceState()->workspacesCopy()) {
-            if (w->m_id == image.workspaceID) {
-                PWORKSPACE = w;
-                break;
-            }
-        }
-
+        const PHLWORKSPACE PWORKSPACE = captureWorkspaceTile(PMONITOR, image, startedOn, monbox);
         if (PWORKSPACE == startedOn)
             currentid = i;
-
-        if (PWORKSPACE) {
-            image.pWorkspace        = PWORKSPACE;
-            const auto previousWS    = activateWorkspaceForPreview(PMONITOR, PWORKSPACE);
-            const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
-            const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
-
-            if (PWORKSPACE == startedOn)
-                PMONITOR->m_activeSpecialWorkspace = openSpecial;
-
-            {
-                CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
-                g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
-            }
-
-            restoreWorkspaceWindowGoalState(windowState);
-            restoreWorkspacePreviewStates(previewStates);
-            restoreActiveWorkspaceAfterPreview(PMONITOR, previousWS);
+        if (PWORKSPACE)
             startedOn->m_visible = false;
-
-            if (PWORKSPACE == startedOn)
-                PMONITOR->m_activeSpecialWorkspace.reset();
-        } else {
-            CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
-            g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
-        }
 
         image.box = {(i % SIDE_LENGTH) * tileRenderSize.x + (i % SIDE_LENGTH) * GAP_WIDTH, (i / SIDE_LENGTH) * tileRenderSize.y + (i / SIDE_LENGTH) * GAP_WIDTH, tileRenderSize.x,
                      tileRenderSize.y};
@@ -873,9 +839,8 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     pMonitor->m_pixelSize       = savedPixelSize;
     pMonitor->m_transformedSize = savedTransformedSize;
 
-    PMONITOR->m_activeSpecialWorkspace = openSpecial;
-    PMONITOR->m_activeWorkspace        = startedOn;
-    startedOn->m_visible               = true;
+    PMONITOR->m_activeWorkspace = startedOn;
+    startedOn->m_visible        = true;
     Animation::Workspace::startAnimation(startedOn, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
 
     // zoom on the current workspace.

@@ -1,15 +1,9 @@
 #pragma once
 
 namespace HyprexpoConfig {
-inline constexpr int         COLUMNS_DEFAULT                 = 3;
-inline constexpr int         COLUMNS_MIN                     = 1;
-inline constexpr int         COLUMNS_MAX                     = 7;
 inline constexpr int         GAPS_IN_DEFAULT                 = 5;
 inline constexpr int         GAPS_OUT_DEFAULT                = 0;
 inline constexpr unsigned    BG_COL_DEFAULT                  = 0xFF111111;
-inline constexpr const char* WORKSPACE_METHOD_DEFAULT        = "center current";
-inline constexpr int         SKIP_EMPTY_DEFAULT              = 0;
-inline constexpr int         MAX_WORKSPACE_DEFAULT           = 0;
 inline constexpr int         SHOW_WORKSPACE_NUMBERS_DEFAULT  = 0;
 inline constexpr unsigned    WORKSPACE_NUMBER_COLOR_DEFAULT  = 0xFFFFFFFF;
 inline constexpr int         GESTURE_DISTANCE_DEFAULT        = 200;
