@@ -640,8 +640,11 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     std::sort(visible.begin(), visible.end(), [](const PHLWORKSPACE& a, const PHLWORKSPACE& b) { return a->m_id < b->m_id; });
 
     // +1 reserves room for at least one empty/creatable tile even when
-    // visible.size() is already a perfect square.
-    SIDE_LENGTH = Hyprexpo::computeSquareGridSideLength(visible.size() + 1);
+    // visible.size() is already a perfect square - unless the workspace
+    // you're currently on is itself already empty, in which case it already
+    // serves as that empty tile and no extra padding slot is needed.
+    const size_t sizeHint = startedOn->getWindowCount() > 0 ? visible.size() + 1 : visible.size();
+    SIDE_LENGTH            = Hyprexpo::computeSquareGridSideLength(sizeHint);
     images.resize(SIDE_LENGTH * SIDE_LENGTH);
 
     for (size_t i = 0; i < visible.size(); ++i)

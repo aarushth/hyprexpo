@@ -126,13 +126,42 @@ Vector2D COverview::tilePointToWorkspacePoint(int id, const Vector2D& localPoint
     if (!MON)
         return {};
 
+    // Tile position/size within the grid is always relative to the overview's
+    // own monitor (that's how the grid is laid out). But the resulting point
+    // must land in the workspace's OWN real monitor's coordinate space - for
+    // a tile whose workspace lives on a different monitor, its windows are
+    // positioned in global coordinates relative to THAT monitor's position,
+    // not MON's. Using MON's position/size for every tile made hit-testing
+    // (and therefore drag-and-drop) silently fail for any foreign-monitor
+    // tile, since the computed point never fell inside its windows' boxes.
+    PHLMONITORREF targetMonitor = pMonitor;
+    if (id >= 0 && id < (int)images.size()) {
+        PHLWORKSPACE workspace = images[id].pWorkspace;
+        if (!workspace) {
+            for (const auto& w : State::workspaceState()->workspacesCopy()) {
+                if (w->m_id == images[id].workspaceID) {
+                    workspace = w;
+                    break;
+                }
+            }
+        }
+        if (workspace) {
+            if (const auto owner = workspace->m_monitor.lock())
+                targetMonitor = owner;
+        }
+    }
+
+    const auto TARGETMON = targetMonitor.lock();
+    if (!TARGETMON)
+        return {};
+
     const Vector2D tileSize = MON->m_size / SIDE_LENGTH;
     const Vector2D tilePos  = tileSize * Vector2D{id % SIDE_LENGTH, id / SIDE_LENGTH};
     const Vector2D inTile   = localPoint - tilePos;
 
-    return MON->m_position + Vector2D{
-        std::clamp(inTile.x / tileSize.x, 0.0, 1.0) * MON->m_size.x,
-        std::clamp(inTile.y / tileSize.y, 0.0, 1.0) * MON->m_size.y,
+    return TARGETMON->m_position + Vector2D{
+        std::clamp(inTile.x / tileSize.x, 0.0, 1.0) * TARGETMON->m_size.x,
+        std::clamp(inTile.y / tileSize.y, 0.0, 1.0) * TARGETMON->m_size.y,
     };
 }
 
