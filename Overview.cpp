@@ -625,7 +625,7 @@ static SForeignMonitorGuard applyForeignMonitorRenderContext(PHLMONITOR renderMo
     return guard;
 }
 
-static void restoreForeignMonitorRenderContext(const SForeignMonitorGuard& guard) {
+static void restoreForeignMonitorRenderContext(PHLMONITOR renderMonitor, const SForeignMonitorGuard& guard) {
     if (!guard.workspace)
         return;
 
@@ -634,6 +634,17 @@ static void restoreForeignMonitorRenderContext(const SForeignMonitorGuard& guard
             window->m_monitor = savedMonitor;
 
     guard.workspace->m_monitor = guard.savedWorkspaceMonitor;
+
+    // The borrow above retiled this workspace's windows to fit renderMonitor's
+    // geometry (a different monitor); now that m_monitor is restored, reflow
+    // them back against the workspace's real monitor, or they're left with
+    // position/size goals sized for the wrong monitor.
+    const auto realMonitor = guard.savedWorkspaceMonitor.lock();
+    if (realMonitor && realMonitor != renderMonitor) {
+        if (g_layoutManager)
+            g_layoutManager->recalculateMonitor(realMonitor);
+        recalculateWorkspaceLayout(guard.workspace);
+    }
 }
 
 PHLWORKSPACE captureWorkspaceTile(PHLMONITOR renderMonitor, COverview::SWorkspaceImage& image, const PHLWORKSPACE& startedOn, const CBox& monbox) {
@@ -669,7 +680,7 @@ PHLWORKSPACE captureWorkspaceTile(PHLMONITOR renderMonitor, COverview::SWorkspac
         restoreWorkspaceWindowGoalState(windowState);
         restoreWorkspacePreviewStates(previewStates);
         restoreActiveWorkspaceAfterPreview(renderMonitor, previousWS);
-        restoreForeignMonitorRenderContext(guard);
+        restoreForeignMonitorRenderContext(renderMonitor, guard);
 
         if (PWORKSPACE == startedOn)
             renderMonitor->m_activeSpecialWorkspace.reset();
