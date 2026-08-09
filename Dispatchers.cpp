@@ -507,12 +507,12 @@ static SDispatchResult onKbFocusDispatcher(std::string arg) {
     if (!g_pOverview)
         return {};
 
-    if (arg == "left" || arg == "right" || arg == "up" || arg == "down") {
+    if (arg == "left" || arg == "right" || arg == "up" || arg == "down" || arg == "next" || arg == "previous") {
         g_pOverview->onKbMoveFocus(arg);
         return {};
     }
 
-    return {.success = false, .error = "invalid arg. expected left|right|up|down"};
+    return {.success = false, .error = "invalid arg. expected left|right|up|down|next|previous"};
 }
 
 static SDispatchResult onKbConfirmDispatcher(std::string arg) {

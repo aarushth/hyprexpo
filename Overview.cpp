@@ -34,7 +34,6 @@
 #include "OverviewPassElement.hpp"
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
-#include <pango/pangocairo.h>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -54,14 +53,6 @@ static bool isStringConfig(const std::string& name) {
         {"plugin:hyprexpo:border_style", true},
         {"plugin:hyprexpo:drag_drop_proxy_border_color", true},
         {"plugin:hyprexpo:drag_drop_source_border_color", true},
-        {"plugin:hyprexpo:label_text_mode", true},
-        {"plugin:hyprexpo:label_token_map", true},
-        {"plugin:hyprexpo:label_position", true},
-        {"plugin:hyprexpo:selection_label_token_map", true},
-        {"plugin:hyprexpo:selection_label_position", true},
-        {"plugin:hyprexpo:label_show", true},
-        {"plugin:hyprexpo:label_bg_shape", true},
-        {"plugin:hyprexpo:label_font_family", true},
         {"plugin:hyprexpo:cancel_key", true},
         {"plugin:hyprexpo:border_grad_current", true},
         {"plugin:hyprexpo:border_grad_focus", true},
@@ -72,9 +63,7 @@ static bool isStringConfig(const std::string& name) {
 }
 
 static bool isFloatConfig(const std::string& name) {
-    return name == "plugin:hyprexpo:tile_rounding_power" ||
-           name == "plugin:hyprexpo:label_scale_hover" ||
-           name == "plugin:hyprexpo:label_scale_focus";
+    return name == "plugin:hyprexpo:tile_rounding_power";
 }
 
 static Config::STRING stringDefault(const std::string& name) {
@@ -86,14 +75,6 @@ static Config::STRING stringDefault(const std::string& name) {
         {"plugin:hyprexpo:border_style", HyprexpoConfig::BORDER_STYLE_DEFAULT},
         {"plugin:hyprexpo:drag_drop_proxy_border_color", HyprexpoConfig::DRAG_DROP_PROXY_BORDER_COLOR_DEFAULT},
         {"plugin:hyprexpo:drag_drop_source_border_color", HyprexpoConfig::DRAG_DROP_SOURCE_BORDER_COLOR_DEFAULT},
-        {"plugin:hyprexpo:label_text_mode", HyprexpoConfig::LABEL_TEXT_MODE_DEFAULT},
-        {"plugin:hyprexpo:label_token_map", HyprexpoConfig::LABEL_TOKEN_MAP_DEFAULT},
-        {"plugin:hyprexpo:label_position", HyprexpoConfig::LABEL_POSITION_DEFAULT},
-        {"plugin:hyprexpo:selection_label_token_map", HyprexpoConfig::SELECTION_LABEL_TOKEN_MAP_DEFAULT},
-        {"plugin:hyprexpo:selection_label_position", HyprexpoConfig::SELECTION_LABEL_POSITION_DEFAULT},
-        {"plugin:hyprexpo:label_show", HyprexpoConfig::LABEL_SHOW_DEFAULT},
-        {"plugin:hyprexpo:label_bg_shape", HyprexpoConfig::LABEL_BG_SHAPE_DEFAULT},
-        {"plugin:hyprexpo:label_font_family", HyprexpoConfig::LABEL_FONT_FAMILY_DEFAULT},
         {"plugin:hyprexpo:cancel_key", HyprexpoConfig::CANCEL_KEY_DEFAULT},
         {"plugin:hyprexpo:border_grad_current", HyprexpoConfig::BORDER_GRAD_CURRENT_DEFAULT},
         {"plugin:hyprexpo:border_grad_focus", HyprexpoConfig::BORDER_GRAD_FOCUS_DEFAULT},
@@ -108,10 +89,6 @@ static Config::STRING stringDefault(const std::string& name) {
 static Config::FLOAT floatDefault(const std::string& name) {
     if (name == "plugin:hyprexpo:tile_rounding_power")
         return HyprexpoConfig::TILE_ROUNDING_POWER_DEFAULT;
-    if (name == "plugin:hyprexpo:label_scale_hover")
-        return HyprexpoConfig::LABEL_SCALE_HOVER_DEFAULT;
-    if (name == "plugin:hyprexpo:label_scale_focus")
-        return HyprexpoConfig::LABEL_SCALE_FOCUS_DEFAULT;
     return 0.0F;
 }
 
@@ -122,8 +99,6 @@ static Config::INTEGER intDefault(const std::string& name) {
         {"plugin:hyprexpo:gesture_distance", HyprexpoConfig::GESTURE_DISTANCE_DEFAULT},
         {"plugin:hyprexpo:show_cursor", HyprexpoConfig::SHOW_CURSOR_DEFAULT},
         {"plugin:hyprexpo:show_pinned_windows", HyprexpoConfig::SHOW_PINNED_WINDOWS_DEFAULT},
-        {"plugin:hyprexpo:show_workspace_numbers", HyprexpoConfig::SHOW_WORKSPACE_NUMBERS_DEFAULT},
-        {"plugin:hyprexpo:workspace_number_color", HyprexpoConfig::WORKSPACE_NUMBER_COLOR_DEFAULT},
         {"plugin:hyprexpo:keynav_enable", HyprexpoConfig::KEYNAV_ENABLE_DEFAULT},
         {"plugin:hyprexpo:border_width", HyprexpoConfig::BORDER_WIDTH_DEFAULT},
         {"plugin:hyprexpo:drag_drop_proxy_color", HyprexpoConfig::DRAG_DROP_PROXY_COLOR_DEFAULT},
@@ -131,22 +106,6 @@ static Config::INTEGER intDefault(const std::string& name) {
         {"plugin:hyprexpo:drag_drop_proxy_border_width", HyprexpoConfig::DRAG_DROP_PROXY_BORDER_WIDTH_DEFAULT},
         {"plugin:hyprexpo:drag_drop_proxy_rounding", HyprexpoConfig::DRAG_DROP_PROXY_ROUNDING_DEFAULT},
         {"plugin:hyprexpo:drag_drop_source_border_width", HyprexpoConfig::DRAG_DROP_SOURCE_BORDER_WIDTH_DEFAULT},
-        {"plugin:hyprexpo:label_enable", HyprexpoConfig::LABEL_ENABLE_DEFAULT},
-        {"plugin:hyprexpo:label_color", HyprexpoConfig::LABEL_COLOR_DEFAULT_LEGACY},
-        {"plugin:hyprexpo:label_font_size", HyprexpoConfig::LABEL_FONT_SIZE_DEFAULT},
-        {"plugin:hyprexpo:label_color_default", HyprexpoConfig::LABEL_COLOR_DEFAULT},
-        {"plugin:hyprexpo:label_color_hover", HyprexpoConfig::LABEL_COLOR_HOVER_DEFAULT},
-        {"plugin:hyprexpo:label_color_focus", HyprexpoConfig::LABEL_COLOR_FOCUS_DEFAULT},
-        {"plugin:hyprexpo:label_color_current", HyprexpoConfig::LABEL_COLOR_CURRENT_DEFAULT},
-        {"plugin:hyprexpo:label_bg_enable", HyprexpoConfig::LABEL_BG_ENABLE_DEFAULT},
-        {"plugin:hyprexpo:label_bg_color", HyprexpoConfig::LABEL_BG_COLOR_DEFAULT},
-        {"plugin:hyprexpo:label_bg_rounding", HyprexpoConfig::LABEL_BG_ROUNDING_DEFAULT},
-        {"plugin:hyprexpo:label_padding", HyprexpoConfig::LABEL_PADDING_DEFAULT},
-        {"plugin:hyprexpo:label_pixel_snap", HyprexpoConfig::LABEL_PIXEL_SNAP_DEFAULT},
-        {"plugin:hyprexpo:selection_label_enable", HyprexpoConfig::SELECTION_LABEL_ENABLE_DEFAULT},
-        {"plugin:hyprexpo:selection_label_offset_x", HyprexpoConfig::SELECTION_LABEL_OFFSET_X_DEFAULT},
-        {"plugin:hyprexpo:selection_label_offset_y", HyprexpoConfig::SELECTION_LABEL_OFFSET_Y_DEFAULT},
-        {"plugin:hyprexpo:selection_label_color", HyprexpoConfig::SELECTION_LABEL_COLOR_DEFAULT},
         {"plugin:hyprexpo:keynav_wrap_h", HyprexpoConfig::KEYNAV_WRAP_H_DEFAULT},
         {"plugin:hyprexpo:keynav_wrap_v", HyprexpoConfig::KEYNAV_WRAP_V_DEFAULT},
         {"plugin:hyprexpo:gaps_out", HyprexpoConfig::GAPS_OUT_DEFAULT},
@@ -155,14 +114,6 @@ static Config::INTEGER intDefault(const std::string& name) {
         {"plugin:hyprexpo:tile_rounding_focus", HyprexpoConfig::TILE_ROUNDING_FOCUS_DEFAULT},
         {"plugin:hyprexpo:tile_rounding_current", HyprexpoConfig::TILE_ROUNDING_CURRENT_DEFAULT},
         {"plugin:hyprexpo:tile_rounding_hover", HyprexpoConfig::TILE_ROUNDING_HOVER_DEFAULT},
-        {"plugin:hyprexpo:label_offset_x", HyprexpoConfig::LABEL_OFFSET_X_DEFAULT},
-        {"plugin:hyprexpo:label_offset_y", HyprexpoConfig::LABEL_OFFSET_Y_DEFAULT},
-        {"plugin:hyprexpo:label_font_bold", HyprexpoConfig::LABEL_FONT_BOLD_DEFAULT},
-        {"plugin:hyprexpo:label_font_italic", HyprexpoConfig::LABEL_FONT_ITALIC_DEFAULT},
-        {"plugin:hyprexpo:label_text_underline", HyprexpoConfig::LABEL_TEXT_UNDERLINE_DEFAULT},
-        {"plugin:hyprexpo:label_text_strikethrough", HyprexpoConfig::LABEL_TEXT_STRIKETHROUGH_DEFAULT},
-        {"plugin:hyprexpo:label_center_adjust_x", HyprexpoConfig::LABEL_CENTER_ADJUST_X_DEFAULT},
-        {"plugin:hyprexpo:label_center_adjust_y", HyprexpoConfig::LABEL_CENTER_ADJUST_Y_DEFAULT},
     };
 
     if (const auto it = DEFAULTS.find(name); it != DEFAULTS.end())
@@ -224,16 +175,8 @@ std::string trimString(std::string value) {
     return Hyprexpo::trimString(std::move(value));
 }
 
-std::vector<std::string> splitCommaList(const std::string& value) {
-    return Hyprexpo::splitCommaList(value);
-}
-
 std::string lowerString(std::string value) {
     return Hyprexpo::lowerString(std::move(value));
-}
-
-std::string fallbackTokenForVisibleIndex(int visibleIndex) {
-    return Hyprexpo::fallbackTokenForVisibleIndex(visibleIndex);
 }
 
 int fallbackTokenToVisibleIndex(const std::string& token) {
@@ -256,80 +199,6 @@ SHyprGradientSpec parseGradientSpec(const std::string& inRaw) {
 // Helper to detect if a border config string is a gradient or solid color
 bool isGradientBorderSpec(const std::string& borderSpec) {
     return Hyprexpo::isGradientBorderSpec(borderSpec);
-}
-
-SP<Render::ITexture> renderNumberTexture(const std::string& text, const CHyprColor& color, const Vector2D& bufferSize, const float scale, const int fontSize) {
-    const auto CAIROSURFACE = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, bufferSize.x, bufferSize.y);
-    const auto CAIRO        = cairo_create(CAIROSURFACE);
-
-    cairo_save(CAIRO);
-    cairo_set_operator(CAIRO, CAIRO_OPERATOR_CLEAR);
-    cairo_paint(CAIRO);
-    cairo_restore(CAIRO);
-
-    PangoLayout* layout = pango_cairo_create_layout(CAIRO);
-    pango_layout_set_text(layout, text.c_str(), -1);
-
-    // font options from config
-    static auto* const PFONTFAM = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_font_family")->getDataStaticPtr();
-    static auto* const PFONTB   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_font_bold")->getDataStaticPtr();
-    static auto* const PFONTI   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_font_italic")->getDataStaticPtr();
-    static auto* const PTUNDER  = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_text_underline")->getDataStaticPtr();
-    static auto* const PTSTRIKE = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_text_strikethrough")->getDataStaticPtr();
-
-    PangoFontDescription* fontDesc = pango_font_description_from_string(*PFONTFAM);
-    pango_font_description_set_size(fontDesc, fontSize * scale * PANGO_SCALE);
-    pango_font_description_set_weight(fontDesc, **PFONTB ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
-    pango_font_description_set_style(fontDesc, **PFONTI ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
-    pango_layout_set_font_description(layout, fontDesc);
-    pango_font_description_free(fontDesc);
-
-    if (**PTUNDER || **PTSTRIKE) {
-        PangoAttrList* attrs = pango_attr_list_new();
-        if (**PTUNDER) {
-            pango_attr_list_insert(attrs, pango_attr_underline_new(PANGO_UNDERLINE_SINGLE));
-        }
-        if (**PTSTRIKE) {
-            pango_attr_list_insert(attrs, pango_attr_strikethrough_new(TRUE));
-        }
-        pango_layout_set_attributes(layout, attrs);
-        pango_attr_list_unref(attrs);
-    }
-
-    pango_layout_set_width(layout, bufferSize.x * PANGO_SCALE);
-    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
-
-    cairo_set_source_rgba(CAIRO, color.r, color.g, color.b, color.a);
-
-    PangoRectangle ink_rect, logical_rect;
-    pango_layout_get_extents(layout, &ink_rect, &logical_rect);
-
-    // center inside the provided buffer using ink rect (accounts for glyph bearings)
-    const int    inkW   = std::max(0, ink_rect.width / PANGO_SCALE);
-    const int    inkH   = std::max(0, ink_rect.height / PANGO_SCALE);
-    const int    inkX   = ink_rect.x / PANGO_SCALE; // can be negative
-    const int    inkY   = ink_rect.y / PANGO_SCALE; // can be negative
-    static auto* const* PCENTERADJX = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_center_adjust_x")->getDataStaticPtr();
-    static auto* const* PCENTERADJY = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:label_center_adjust_y")->getDataStaticPtr();
-    const double xOffset = (bufferSize.x - inkW) / 2.0 - inkX + **PCENTERADJX;
-    const double yOffset = (bufferSize.y - inkH) / 2.0 - inkY + **PCENTERADJY;
-
-    cairo_move_to(CAIRO, xOffset, yOffset);
-    pango_cairo_show_layout(CAIRO, layout);
-    g_object_unref(layout);
-
-    cairo_surface_flush(CAIROSURFACE);
-
-    auto tex = g_pHyprRenderer->createTexture(CAIROSURFACE);
-    if (tex) {
-        tex->setTexParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        tex->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    }
-
-    cairo_destroy(CAIRO);
-    cairo_surface_destroy(CAIROSURFACE);
-
-    return tex;
 }
 
 static void damageMonitor(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
@@ -745,11 +614,9 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
     static auto* const* PGAPS    = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:gaps_in")->getDataStaticPtr();
     static auto* const* PCOL     = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:bg_col")->getDataStaticPtr();
-    static auto* const* PSHOWNUM = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:show_workspace_numbers")->getDataStaticPtr();
 
-    GAP_WIDTH            = std::max<Hyprlang::INT>(0, **PGAPS);
-    BG_COLOR             = **PCOL;
-    showWorkspaceNumbers = **PSHOWNUM;
+    GAP_WIDTH = std::max<Hyprlang::INT>(0, **PGAPS);
+    BG_COLOR  = **PCOL;
 
     // Gather every monitor's active workspace ID, so those workspaces are
     // always shown even if currently empty (you never lose "where you are").
@@ -772,7 +639,9 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     }
     std::sort(visible.begin(), visible.end(), [](const PHLWORKSPACE& a, const PHLWORKSPACE& b) { return a->m_id < b->m_id; });
 
-    SIDE_LENGTH = Hyprexpo::computeSquareGridSideLength(visible.size());
+    // +1 reserves room for at least one empty/creatable tile even when
+    // visible.size() is already a perfect square.
+    SIDE_LENGTH = Hyprexpo::computeSquareGridSideLength(visible.size() + 1);
     images.resize(SIDE_LENGTH * SIDE_LENGTH);
 
     for (size_t i = 0; i < visible.size(); ++i)

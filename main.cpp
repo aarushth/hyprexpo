@@ -132,7 +132,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     HyprlandAPI::reloadConfig();
 
-    return {"hyprexpo", "hyprexpo+ with keyboard selection, labels, and borders", "sandwich", HYPREXPO_VERSION};
+    return {"hyprexpo", "hyprexpo+ with keyboard selection and borders", "sandwich", HYPREXPO_VERSION};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

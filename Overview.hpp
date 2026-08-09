@@ -67,17 +67,6 @@ class COverview {
         int64_t                  workspaceID = -1;
         PHLWORKSPACE             pWorkspace;
         CBox                     box;
-        // Label textures per state for customization
-        SP<Render::ITexture>     labelTexDefault;
-        SP<Render::ITexture>     labelTexHover;
-        SP<Render::ITexture>     labelTexFocus;
-        SP<Render::ITexture>     labelTexCurrent;
-        SP<Render::ITexture>     selectionLabelTex;
-        Vector2D                 labelSizeDefault = {0, 0};
-        Vector2D                 labelSizeHover   = {0, 0};
-        Vector2D                 labelSizeFocus   = {0, 0};
-        Vector2D                 labelSizeCurrent = {0, 0};
-        Vector2D                 selectionLabelSize = {0, 0};
     };
 
   private:
@@ -89,6 +78,7 @@ class COverview {
     void       ensureKbFocusInitialized();
     bool       isTileValid(int id) const;
     void       moveFocus(int dx, int dy);
+    void       moveFocusLinear(int step);
     int        tileForWorkspaceID(int wsid) const;
     int        tileForVisibleIndex(int vIdx) const;
     void       beginWindowDrag();
@@ -149,7 +139,6 @@ class COverview {
 
     bool                         swipe             = false;
     bool                         swipeWasCommenced = false;
-    bool                         showWorkspaceNumbers = false;
 
     friend class COverviewPassElement;
 };

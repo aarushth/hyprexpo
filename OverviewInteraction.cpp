@@ -89,13 +89,8 @@ void COverview::ensureKbFocusInitialized() {
         return;
     }
 
-    // fallback: first valid tile
-    for (size_t i = 0; i < images.size(); ++i) {
-        if (isTileValid(i)) {
-            kbFocusID = i;
-            return;
-        }
-    }
+    // fallback: any tile (including empty ones) is a legitimate focus target
+    kbFocusID = 0;
 }
 
 bool COverview::isTileValid(int id) const {
@@ -405,24 +400,9 @@ bool COverview::selectVisibleToken(const std::string& token) {
     if (closing)
         return false;
 
-    static auto* const* PSELECTLABEL = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_enable")->getDataStaticPtr();
-    static auto const*  PSELECTMAP   = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:selection_label_token_map")->getDataStaticPtr();
-
     const std::string normalized = lowerString(trimString(token));
     if (normalized.empty())
         return false;
-
-    if (**PSELECTLABEL) {
-        const auto tokens = splitCommaList(std::string{*PSELECTMAP});
-        for (size_t i = 0; i < tokens.size(); ++i) {
-            if (tokens[i].empty() || lowerString(tokens[i]) != normalized)
-                continue;
-
-            return selectVisibleIndex(i);
-        }
-
-        return false;
-    }
 
     const int visibleIndex = fallbackTokenToVisibleIndex(normalized);
     if (visibleIndex < 0)
@@ -442,65 +422,61 @@ void COverview::moveFocus(int dx, int dy) {
     static auto* const* PWRAPH = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:keynav_wrap_h")->getDataStaticPtr();
     static auto* const* PWRAPV = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:keynav_wrap_v")->getDataStaticPtr();
 
+    // Every in-bounds tile (including empty/padding ones) is a legitimate
+    // keyboard focus target - clicking an empty tile already works (it opens
+    // a new workspace), so arrow-key navigation should be able to land there
+    // too rather than skipping over it.
     if (dx != 0) {
         static auto* const* PREADING = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:keynav_reading_order")->getDataStaticPtr();
         int                 step     = dx > 0 ? 1 : -1;
         if (**PREADING) {
-            // reading-order scan: proceed linearly across the grid (row-major)
+            // reading-order: proceed linearly across the grid (row-major)
             const int total = SIDE_LENGTH * SIDE_LENGTH;
-            int       idx   = kbFocusID;
-            for (int tries = 0; tries < total; ++tries) {
-                idx += step;
-                if (idx < 0 || idx >= total) {
-                    // wrap only if both wraps are enabled (edge of grid)
-                    if (**PWRAPH && **PWRAPV)
-                        idx = (idx + total) % total;
-                    else
-                        break;
-                }
-                if (isTileValid(idx)) {
-                    kbFocusID = idx;
+            int       idx   = kbFocusID + step;
+            if (idx < 0 || idx >= total) {
+                // wrap only if both wraps are enabled (edge of grid)
+                if (**PWRAPH && **PWRAPV)
+                    idx = (idx + total) % total;
+                else
                     return;
-                }
             }
+            kbFocusID = idx;
         } else {
-            // in-row scan with optional horizontal wrap
-            int nx = x;
-            for (int tries = 0; tries < SIDE_LENGTH; ++tries) {
-                nx += step;
-                if (nx < 0 || nx >= SIDE_LENGTH) {
-                    if (**PWRAPH)
-                        nx = (nx + SIDE_LENGTH) % SIDE_LENGTH;
-                    else
-                        break;
-                }
-                const int nid = nx + y * SIDE_LENGTH;
-                if (isTileValid(nid)) {
-                    kbFocusID = nid;
+            int nx = x + step;
+            if (nx < 0 || nx >= SIDE_LENGTH) {
+                if (**PWRAPH)
+                    nx = (nx + SIDE_LENGTH) % SIDE_LENGTH;
+                else
                     return;
-                }
             }
+            kbFocusID = nx + y * SIDE_LENGTH;
         }
     }
 
     if (dy != 0) {
         int step = dy > 0 ? 1 : -1;
-        int ny   = y;
-        for (int tries = 0; tries < SIDE_LENGTH; ++tries) {
-            ny += step;
-            if (ny < 0 || ny >= SIDE_LENGTH) {
-                if (**PWRAPV)
-                    ny = (ny + SIDE_LENGTH) % SIDE_LENGTH;
-                else
-                    break;
-            }
-            const int nid = x + ny * SIDE_LENGTH;
-            if (isTileValid(nid)) {
-                kbFocusID = nid;
+        int ny   = y + step;
+        if (ny < 0 || ny >= SIDE_LENGTH) {
+            if (**PWRAPV)
+                ny = (ny + SIDE_LENGTH) % SIDE_LENGTH;
+            else
                 return;
-            }
         }
+        kbFocusID = x + ny * SIDE_LENGTH;
     }
+}
+
+void COverview::moveFocusLinear(int step) {
+    ensureKbFocusInitialized();
+    if (kbFocusID == -1)
+        return;
+
+    // Always wraps: hitting next/previous on the last tile of a row moves to
+    // the first tile of the next row, and wrapping past the last/first tile
+    // in the whole grid cycles to the other end - consistent in both
+    // directions, unlike left/right/up/down which respect keynav_wrap_h/v.
+    const int total = SIDE_LENGTH * SIDE_LENGTH;
+    kbFocusID        = ((kbFocusID + step) % total + total) % total;
 }
 
 void COverview::onKbMoveFocus(const std::string& dir) {
@@ -514,6 +490,10 @@ void COverview::onKbMoveFocus(const std::string& dir) {
         moveFocus(0, -1);
     else if (dir == "down")
         moveFocus(0, 1);
+    else if (dir == "next")
+        moveFocusLinear(1);
+    else if (dir == "previous")
+        moveFocusLinear(-1);
 
     damage();
 }

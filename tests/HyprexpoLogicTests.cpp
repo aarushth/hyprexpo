@@ -31,7 +31,6 @@ int main() {
     using namespace Hyprexpo;
 
     expect(trimString("  DP-1 first 1 \t") == "DP-1 first 1", "trimString removes surrounding whitespace");
-    expect(splitCommaList("a, b,,c").size() == 4, "splitCommaList preserves empty entries");
 
     expect(computeSquareGridSideLength(0) == 2, "grid side length has a floor of 2 for zero workspaces");
     expect(computeSquareGridSideLength(1) == 2, "grid side length has a floor of 2 for one workspace");
@@ -83,9 +82,6 @@ int main() {
     dropInput.windowSize.w = 0;
     expect(!computeDropIntentGeometry(dropInput).valid, "drop intent rejects invalid window size");
 
-    expect(fallbackTokenForVisibleIndex(0) == "1", "fallback token first workspace");
-    expect(fallbackTokenForVisibleIndex(9) == "0", "fallback token tenth workspace");
-    expect(fallbackTokenForVisibleIndex(10) == "a", "fallback token alpha start");
     expect(fallbackTokenToVisibleIndex("A") == 10, "fallback token accepts uppercase alpha");
     expect(fallbackTokenToVisibleIndex("zz") == -1, "fallback token rejects multi-character fallback");
 

@@ -22,25 +22,6 @@ std::string lowerString(std::string value) {
     return value;
 }
 
-std::vector<std::string> splitCommaList(const std::string& value) {
-    std::vector<std::string> entries;
-    size_t                   start = 0;
-
-    while (start <= value.size()) {
-        size_t comma = value.find(',', start);
-        if (comma == std::string::npos)
-            comma = value.size();
-
-        entries.push_back(trimString(value.substr(start, comma - start)));
-
-        if (comma == value.size())
-            break;
-        start = comma + 1;
-    }
-
-    return entries;
-}
-
 namespace {
 int clampSideLength(int sideLength) {
     return std::max(1, sideLength);
@@ -89,19 +70,6 @@ SDropIntentGeometry computeDropIntentGeometry(const SDropIntentInput& input) {
     };
 
     return geometry;
-}
-
-std::string fallbackTokenForVisibleIndex(int visibleIndex) {
-    if (visibleIndex < 0)
-        return "";
-    if (visibleIndex < 9)
-        return std::to_string(visibleIndex + 1);
-    if (visibleIndex == 9)
-        return "0";
-    if (visibleIndex < 36)
-        return std::string(1, static_cast<char>('a' + visibleIndex - 10));
-
-    return "";
 }
 
 int fallbackTokenToVisibleIndex(const std::string& token) {

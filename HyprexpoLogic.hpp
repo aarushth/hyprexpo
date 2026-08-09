@@ -55,13 +55,11 @@ struct SDropIntentGeometry {
 
 std::string              trimString(std::string value);
 std::string              lowerString(std::string value);
-std::vector<std::string> splitCommaList(const std::string& value);
 
 int                      computeSquareGridSideLength(size_t workspaceCount);
 int                      tileIndexFromPoint(double x, double y, double width, double height, int sideLength);
 SDropIntentGeometry      computeDropIntentGeometry(const SDropIntentInput& input);
 
-std::string              fallbackTokenForVisibleIndex(int visibleIndex);
 int                      fallbackTokenToVisibleIndex(const std::string& token);
 
 bool                     parseHexRGBA8(const std::string& value, SColorRGBA& out);

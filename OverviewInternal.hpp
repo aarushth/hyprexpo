@@ -53,14 +53,11 @@ uint32_t framebufferFormatWithAlpha(uint32_t drmFormat);
 bool isTransformRotated(wl_output_transform t);
 
 std::string trimString(std::string value);
-std::vector<std::string> splitCommaList(const std::string& value);
 std::string lowerString(std::string value);
-std::string fallbackTokenForVisibleIndex(int visibleIndex);
 int fallbackTokenToVisibleIndex(const std::string& token);
 
 SHyprGradientSpec parseGradientSpec(const std::string& inRaw);
 bool isGradientBorderSpec(const std::string& borderSpec);
-SP<Render::ITexture> renderNumberTexture(const std::string& text, const CHyprColor& color, const Vector2D& bufferSize, float scale, int fontSize);
 
 SWorkspacePreviewState applyWorkspacePreviewState(const PHLWORKSPACE& workspace);
 void restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state);
