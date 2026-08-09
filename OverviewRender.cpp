@@ -151,7 +151,10 @@ void COverview::close(bool switchToSelection) {
             }
         }
 
-        const auto OLDWS = MON->m_activeWorkspace;
+        const auto OLDWS    = MON->m_activeWorkspace;
+        // Captured before the swap: this is the monitor OLDWS will land on
+        // when changeWorkspaceOnCurrentMonitor swaps it out from under MON.
+        const auto OTHERMON = NEWIDWS ? NEWIDWS->m_monitor.lock() : nullptr;
 
         // Use changeWorkspaceOnCurrentMonitor so selecting a tile whose
         // workspace lives on another monitor brings it to the monitor the
@@ -160,6 +163,31 @@ void COverview::close(bool switchToSelection) {
         const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspaceOnCurrentMonitor(NEWIDWS);
         if (!CHANGE)
             Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+
+        else if (NEWIDWS) {
+            // changeWorkspaceOnCurrentMonitor has a known upstream focus-desync
+            // bug when it swaps a workspace onto the current monitor (Hyprland
+            // issue #4626): the active border and keyboard input can end up
+            // pointed at the wrong monitor. Explicitly re-focusing MON afterward
+            // mirrors the community workaround of manually refocusing a window.
+            (void)Config::Actions::focusMonitor(MON);
+
+            // The overview keeps rendering every monitor's tiles off-screen for
+            // the whole time it's open, which can leave the monitor that just
+            // received OLDWS with a stale layout/paint after the swap (windows
+            // offset, or a blank screen) until something forces a fresh
+            // recalculation - this is what manually switching workspaces there
+            // and back does; do it programmatically for both monitors instead.
+            restoreActiveWorkspaceAfterPreview(MON, MON->m_activeWorkspace);
+            g_pHyprRenderer->damageMonitor(MON);
+            MON->scheduleFrame();
+
+            if (OTHERMON && OTHERMON != MON) {
+                restoreActiveWorkspaceAfterPreview(OTHERMON, OLDWS);
+                g_pHyprRenderer->damageMonitor(OTHERMON);
+                OTHERMON->scheduleFrame();
+            }
+        }
 
         Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
         Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
