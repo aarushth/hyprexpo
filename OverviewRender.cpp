@@ -14,45 +14,13 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
+#include <hyprland/src/state/WorkspacePlacementController.hpp>
 #undef private
 #undef protected
 #include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
-#include <sys/wait.h>
-#include <unistd.h>
-
-// Runs `hyprctl dispatch <dispatcher> <arg>` in a detached, double-forked
-// child so it executes on Hyprland's normal IPC path, fully decoupled from
-// this call site and this frame. Used specifically for cross-monitor
-// workspace swaps: performing that swap in-process, mid-overview-close,
-// interacts badly with the overview's own repeated off-screen rendering of
-// the other monitor's tiles (observed as persistent blank/offset rendering
-// on that monitor after the swap). Deferring it lets the swap run only after
-// the overview and its renders have fully torn down.
-static void dispatchAsync(const std::string& dispatcher, const std::string& arg) {
-    const pid_t pid = fork();
-    if (pid < 0) {
-        Log::logger->log(Log::ERR, "[hyprexpo] fork failed for async dispatch");
-        return;
-    }
-
-    if (pid == 0) {
-        // First child: detach, then fork again so the grandchild running
-        // hyprctl gets reparented to init and never becomes our zombie.
-        setsid();
-        const pid_t grandchild = fork();
-        if (grandchild == 0) {
-            execlp("hyprctl", "hyprctl", "dispatch", dispatcher.c_str(), arg.c_str(), nullptr);
-            _exit(127);
-        }
-        _exit(0);
-    }
-
-    int status = 0;
-    waitpid(pid, &status, 0);
-}
 
 void COverview::redrawID(int id, bool forcelowres) {
     const auto MON = pMonitor.lock();
@@ -184,27 +152,34 @@ void COverview::close(bool switchToSelection) {
             }
         }
 
-        const auto OLDWS            = MON->m_activeWorkspace;
-        const auto NEWWSMONITOR     = NEWIDWS ? NEWIDWS->m_monitor.lock() : nullptr;
-        const bool crossMonitorSwap = NEWIDWS && NEWWSMONITOR && NEWWSMONITOR != MON;
+        const auto OLDWS    = MON->m_activeWorkspace;
+        const auto OTHERMON = NEWIDWS ? NEWIDWS->m_monitor.lock() : nullptr;
 
-        if (crossMonitorSwap) {
-            // Defer to an external hyprctl call (see dispatchAsync above)
-            // instead of changeWorkspaceOnCurrentMonitor in-process: by the
-            // time it actually runs, the overview (and its per-frame off-
-            // screen rendering of the other monitor) will have fully closed,
-            // so there's no more interference to corrupt the swap.
-            dispatchAsync("focusworkspaceoncurrentmonitor", NEWIDWS->getConfigName());
+        if (NEWIDWS && OTHERMON && OTHERMON != MON) {
+            // Config::Actions::changeWorkspaceOnCurrentMonitor resolves "current
+            // monitor" via global focus state (Desktop::focusState()->monitor()),
+            // NOT the monitor passed in - if focus wasn't actually on MON at this
+            // instant, the real swap lands on a different monitor pair than
+            // expected, leaving windows laid out against the wrong monitor's
+            // geometry (rendered blank, or offset by the size difference between
+            // monitors). Call the same underlying primitive that dispatcher uses,
+            // but with both monitors explicit and unambiguous.
+            if (OTHERMON->activeWorkspaceID() == NEWIDWS->m_id)
+                State::workspacePlacementController()->swapActiveWorkspaces(OTHERMON, MON);
+            else
+                State::workspacePlacementController()->moveWorkspaceToMonitor(NEWIDWS, MON, true);
+
+            (void)Config::Actions::focusMonitor(MON);
         } else {
-            const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspaceOnCurrentMonitor(NEWIDWS);
+            const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
             if (!CHANGE)
                 Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
-
-            Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
-            Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
-
-            startedOn = MON->m_activeWorkspace;
         }
+
+        Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
+        Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
+
+        startedOn = MON->m_activeWorkspace;
     }
 
     size->setCallbackOnEnd(removeOverview);
