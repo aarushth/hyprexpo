@@ -38,56 +38,13 @@ void COverview::redrawID(int id, bool forcelowres) {
 
     id = std::clamp(id, 0, SIDE_LENGTH * SIDE_LENGTH - 1);
 
-    Vector2D tileSize       = MON->m_size / SIDE_LENGTH;
-    Vector2D tileRenderSize = (MON->m_size - Vector2D{GAP_WIDTH, GAP_WIDTH} * (SIDE_LENGTH - 1)) / SIDE_LENGTH;
-    CBox     monbox{0, 0, tileSize.x * 2, tileSize.y * 2};
-
-    if (!forcelowres && (size->value() != MON->m_size || closing))
-        monbox = {{0, 0}, MON->m_pixelSize};
-
-    if (!ENABLE_LOWRES)
-        monbox = {{0, 0}, MON->m_pixelSize};
-
-    const auto savedTransform       = MON->m_transform;
-    const auto savedTransformedSize = MON->m_transformedSize;
-    const auto savedPixelSize       = MON->m_pixelSize;
-
-    // Fix for rotated monitors: swap dimensions to match logical orientation
-    if (isTransformRotated(savedTransform)) {
-        monbox = {{0, 0}, {monbox.h, monbox.w}};
-
-        // Override monitor state to disable rotation
-        MON->m_transform       = WL_OUTPUT_TRANSFORM_NORMAL;
-        MON->m_pixelSize       = {monbox.w, monbox.h};
-        MON->m_transformedSize = {monbox.w, monbox.h};
-    }
-
     auto& image = images[id];
-
-    ensureFramebuffer(image, monbox, framebufferFormatWithAlpha(MON->m_output->state->state().drmFormat));
-
-    CRegion fakeDamage{0, 0, INT16_MAX, INT16_MAX};
-    g_pHyprRenderer->beginRender(MON, fakeDamage, Render::RENDER_MODE_FULL_FAKE, nullptr, image.fb);
-
-    clearWithColor(CHyprColor{0, 0, 0, 1.0});
 
     const auto restoreWorkspace = MON->m_activeWorkspace;
 
     startedOn->m_visible = false;
 
-    captureWorkspaceTile(MON, image, startedOn, monbox);
-
-    g_pHyprRenderer->m_renderData.blockScreenShader = true;
-    g_pHyprRenderer->endRender();
-
-    // Restore the original monitor state after capture
-    MON->m_transform       = savedTransform;
-    MON->m_pixelSize       = savedPixelSize;
-    MON->m_transformedSize = savedTransformedSize;
-
-    // Capture normalizes rotated monitor geometry; Hyprland's output path adds one more half-turn.
-    if (const auto texture = image.fb->getTexture(); texture)
-        texture->m_transform = isTransformRotated(savedTransform) ? HYPRUTILS_TRANSFORM_180 : HYPRUTILS_TRANSFORM_NORMAL;
+    captureWorkspaceTile(MON, image, startedOn);
 
     const auto activeWorkspace = restoreWorkspace ? restoreWorkspace : startedOn;
     MON->m_activeWorkspace = activeWorkspace;

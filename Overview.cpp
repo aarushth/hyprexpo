@@ -594,60 +594,18 @@ void restoreActiveWorkspaceAfterPreview(PHLMONITOR monitor, const PHLWORKSPACE& 
 }
 
 // Overview tiles can now preview a workspace that natively belongs to a
-// different monitor than the one doing the rendering (multi-monitor grid).
-// activateWorkspaceForPreview()/recalculateMonitor() key off m_monitor on
-// both the workspace and its windows to resolve layout/position, so those
-// must temporarily agree with the render monitor for the borrow to produce
-// correct geometry; restored immediately after the render below.
-struct SForeignMonitorGuard {
-    PHLWORKSPACE                                     workspace;
-    PHLMONITORREF                                    savedWorkspaceMonitor;
-    std::vector<std::pair<PHLWINDOW, PHLMONITORREF>> savedWindowMonitors;
-};
-
-static SForeignMonitorGuard applyForeignMonitorRenderContext(PHLMONITOR renderMonitor, const PHLWORKSPACE& workspace) {
-    SForeignMonitorGuard guard;
-    if (!workspace)
-        return guard;
-
-    guard.workspace             = workspace;
-    guard.savedWorkspaceMonitor = workspace->m_monitor;
-    workspace->m_monitor        = renderMonitor;
-
-    for (const auto& window : Desktop::windowState()->windows()) {
-        if (!window || window->m_workspace != workspace || !window->m_isMapped)
-            continue;
-
-        guard.savedWindowMonitors.push_back({window, window->m_monitor});
-        window->m_monitor = renderMonitor;
-    }
-
-    return guard;
-}
-
-static void restoreForeignMonitorRenderContext(PHLMONITOR renderMonitor, const SForeignMonitorGuard& guard) {
-    if (!guard.workspace)
-        return;
-
-    for (const auto& [window, savedMonitor] : guard.savedWindowMonitors)
-        if (window)
-            window->m_monitor = savedMonitor;
-
-    guard.workspace->m_monitor = guard.savedWorkspaceMonitor;
-
-    // The borrow above retiled this workspace's windows to fit renderMonitor's
-    // geometry (a different monitor); now that m_monitor is restored, reflow
-    // them back against the workspace's real monitor, or they're left with
-    // position/size goals sized for the wrong monitor.
-    const auto realMonitor = guard.savedWorkspaceMonitor.lock();
-    if (realMonitor && realMonitor != renderMonitor) {
-        if (g_layoutManager)
-            g_layoutManager->recalculateMonitor(realMonitor);
-        recalculateWorkspaceLayout(guard.workspace);
-    }
-}
-
-PHLWORKSPACE captureWorkspaceTile(PHLMONITOR renderMonitor, COverview::SWorkspaceImage& image, const PHLWORKSPACE& startedOn, const CBox& monbox) {
+// different monitor than the one hosting the overview. Rather than borrowing
+// the overview's monitor as the render context (which forces Hyprland to
+// retile the workspace's windows to fit that OTHER monitor's geometry/scale
+// - wrong size, and previously also left them moved after closing), each
+// tile is rendered using its own workspace's real, unmodified monitor as
+// context. That makes this exactly the pre-existing same-monitor capture
+// path (workspace->m_monitor already matches the render monitor), so no
+// window/workspace state needs to be touched or restored at all. The
+// resulting per-tile framebuffer (sized to that monitor's own resolution)
+// is later scaled into the grid tile like any other, via fullRender()'s
+// texture blit.
+PHLWORKSPACE captureWorkspaceTile(PHLMONITOR fallbackMonitor, COverview::SWorkspaceImage& image, const PHLWORKSPACE& startedOn) {
     PHLWORKSPACE PWORKSPACE = image.pWorkspace;
     if (!PWORKSPACE) {
         for (const auto& w : State::workspaceState()->workspacesCopy()) {
@@ -659,37 +617,79 @@ PHLWORKSPACE captureWorkspaceTile(PHLMONITOR renderMonitor, COverview::SWorkspac
         image.pWorkspace = PWORKSPACE;
     }
 
-    PHLWORKSPACE openSpecial = renderMonitor->m_activeSpecialWorkspace;
+    PHLMONITOR targetMonitor = fallbackMonitor;
+    if (PWORKSPACE) {
+        if (const auto ownerMonitor = PWORKSPACE->m_monitor.lock())
+            targetMonitor = ownerMonitor;
+    }
+
+    // Note: the (currently disabled, see ENABLE_LOWRES) half-resolution
+    // capture mode isn't ported here - it was sized relative to the overview
+    // grid's own tile size, which doesn't map onto a tile whose content
+    // comes from a different monitor's native resolution.
+    CBox monbox{{0, 0}, targetMonitor->m_pixelSize};
+
+    const auto savedTransform       = targetMonitor->m_transform;
+    const auto savedTransformedSize = targetMonitor->m_transformedSize;
+    const auto savedPixelSize       = targetMonitor->m_pixelSize;
+
+    // Fix for rotated monitors: m_pixelSize contains physical panel dimensions
+    // (landscape), but we need logical portrait dimensions for the framebuffer
+    if (isTransformRotated(savedTransform)) {
+        monbox = {{0, 0}, {monbox.h, monbox.w}};
+
+        targetMonitor->m_transform       = WL_OUTPUT_TRANSFORM_NORMAL;
+        targetMonitor->m_pixelSize       = {monbox.w, monbox.h};
+        targetMonitor->m_transformedSize = {monbox.w, monbox.h};
+    }
+
+    ensureFramebuffer(image, monbox, framebufferFormatWithAlpha(targetMonitor->m_output->state->state().drmFormat));
+
+    CRegion fakeDamage{0, 0, INT16_MAX, INT16_MAX};
+    g_pHyprRenderer->beginRender(targetMonitor, fakeDamage, Render::RENDER_MODE_FULL_FAKE, nullptr, image.fb);
+
+    clearWithColor(CHyprColor{0, 0, 0, 1.0});
+
+    PHLWORKSPACE openSpecial = targetMonitor->m_activeSpecialWorkspace;
     if (openSpecial)
-        renderMonitor->m_activeSpecialWorkspace.reset();
+        targetMonitor->m_activeSpecialWorkspace.reset();
 
     if (PWORKSPACE) {
-        const auto guard         = applyForeignMonitorRenderContext(renderMonitor, PWORKSPACE);
-        const auto previousWS    = activateWorkspaceForPreview(renderMonitor, PWORKSPACE);
+        const auto previousWS    = activateWorkspaceForPreview(targetMonitor, PWORKSPACE);
         const auto previewStates = applyExclusiveWorkspacePreviewState(PWORKSPACE);
         const auto windowState   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
 
         if (PWORKSPACE == startedOn)
-            renderMonitor->m_activeSpecialWorkspace = openSpecial;
+            targetMonitor->m_activeSpecialWorkspace = openSpecial;
 
         {
             CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
-            g_pHyprRenderer->renderWorkspace(renderMonitor, PWORKSPACE, Time::steadyNow(), monbox);
+            g_pHyprRenderer->renderWorkspace(targetMonitor, PWORKSPACE, Time::steadyNow(), monbox);
         }
 
         restoreWorkspaceWindowGoalState(windowState);
         restoreWorkspacePreviewStates(previewStates);
-        restoreActiveWorkspaceAfterPreview(renderMonitor, previousWS);
-        restoreForeignMonitorRenderContext(renderMonitor, guard);
+        restoreActiveWorkspaceAfterPreview(targetMonitor, previousWS);
 
         if (PWORKSPACE == startedOn)
-            renderMonitor->m_activeSpecialWorkspace.reset();
+            targetMonitor->m_activeSpecialWorkspace.reset();
     } else {
         CPinnedWindowPreviewGuard pinnedWindowPreviewGuard{showPinnedWindowsInPreview()};
-        g_pHyprRenderer->renderWorkspace(renderMonitor, PWORKSPACE, Time::steadyNow(), monbox);
+        g_pHyprRenderer->renderWorkspace(targetMonitor, PWORKSPACE, Time::steadyNow(), monbox);
     }
 
-    renderMonitor->m_activeSpecialWorkspace = openSpecial;
+    targetMonitor->m_activeSpecialWorkspace = openSpecial;
+
+    g_pHyprRenderer->m_renderData.blockScreenShader = true;
+    g_pHyprRenderer->endRender();
+
+    targetMonitor->m_transform       = savedTransform;
+    targetMonitor->m_pixelSize       = savedPixelSize;
+    targetMonitor->m_transformedSize = savedTransformedSize;
+
+    // Capture normalizes rotated monitor geometry; Hyprland's output path adds one more half-turn.
+    if (const auto texture = image.fb->getTexture(); texture)
+        texture->m_transform = isTransformRotated(savedTransform) ? HYPRUTILS_TRANSFORM_180 : HYPRUTILS_TRANSFORM_NORMAL;
 
     return PWORKSPACE;
 }
@@ -782,36 +782,9 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
     Vector2D tileSize       = pMonitor->m_size / SIDE_LENGTH;
     Vector2D tileRenderSize = (pMonitor->m_size - Vector2D{GAP_WIDTH * pMonitor->m_scale, GAP_WIDTH * pMonitor->m_scale} * (SIDE_LENGTH - 1)) / SIDE_LENGTH;
-    CBox     monbox{0, 0, tileSize.x * 2, tileSize.y * 2};
 
-    if (!ENABLE_LOWRES)
-        monbox = {{0, 0}, pMonitor->m_pixelSize};
+    int currentid = 0;
 
-    int          currentid = 0;
-
-    // Temporarily disable monitor rotation during framebuffer capture so
-    // workspace content renders in the logical (portrait) orientation
-    // rather than the physical panel orientation.
-    const auto savedTransform       = pMonitor->m_transform;
-    const auto savedTransformedSize = pMonitor->m_transformedSize;
-    const auto savedPixelSize       = pMonitor->m_pixelSize;
-
-    // Fix for rotated monitors: m_pixelSize contains physical panel dimensions
-    // (landscape), but we need logical portrait dimensions for the framebuffer
-    if (isTransformRotated(savedTransform)) {
-        // Swap monbox dimensions to match logical orientation
-        monbox = {{0, 0}, {monbox.h, monbox.w}};
-
-        // Override monitor state: disable rotation and set all size fields to
-        // portrait dimensions so beginRender sets up the viewport correctly
-        pMonitor->m_transform       = WL_OUTPUT_TRANSFORM_NORMAL;
-        pMonitor->m_pixelSize       = {monbox.w, monbox.h};
-        pMonitor->m_transformedSize = {monbox.w, monbox.h};
-    }
-
-    // captureWorkspaceTile() strips/restores PMONITOR->m_activeSpecialWorkspace
-    // per tile (only the startedOn tile briefly shows it), so no outer
-    // strip/restore is needed here.
     g_pHyprRenderer->m_bBlockSurfaceFeedback = true;
     settleWorkspaceMoveAnimations();
 
@@ -819,14 +792,8 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
     for (size_t i = 0; i < (size_t)(SIDE_LENGTH * SIDE_LENGTH); ++i) {
         COverview::SWorkspaceImage& image = images[i];
-        ensureFramebuffer(image, monbox, framebufferFormatWithAlpha(PMONITOR->m_output->state->state().drmFormat));
 
-        CRegion fakeDamage{0, 0, INT16_MAX, INT16_MAX};
-        g_pHyprRenderer->beginRender(PMONITOR, fakeDamage, Render::RENDER_MODE_FULL_FAKE, nullptr, image.fb);
-
-        clearWithColor(CHyprColor{0, 0, 0, 1.0});
-
-        const PHLWORKSPACE PWORKSPACE = captureWorkspaceTile(PMONITOR, image, startedOn, monbox);
+        const PHLWORKSPACE PWORKSPACE = captureWorkspaceTile(PMONITOR, image, startedOn);
         if (PWORKSPACE == startedOn)
             currentid = i;
         if (PWORKSPACE)
@@ -834,21 +801,9 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
         image.box = {(i % SIDE_LENGTH) * tileRenderSize.x + (i % SIDE_LENGTH) * GAP_WIDTH, (i / SIDE_LENGTH) * tileRenderSize.y + (i / SIDE_LENGTH) * GAP_WIDTH, tileRenderSize.x,
                      tileRenderSize.y};
-
-        g_pHyprRenderer->m_renderData.blockScreenShader = true;
-        g_pHyprRenderer->endRender();
-
-        // Capture normalizes rotated monitor geometry; Hyprland's output path adds one more half-turn.
-        if (const auto texture = image.fb->getTexture(); texture)
-            texture->m_transform = isTransformRotated(savedTransform) ? HYPRUTILS_TRANSFORM_180 : HYPRUTILS_TRANSFORM_NORMAL;
     }
 
     g_pHyprRenderer->m_bBlockSurfaceFeedback = false;
-
-    // Restore the original monitor state after capture
-    pMonitor->m_transform       = savedTransform;
-    pMonitor->m_pixelSize       = savedPixelSize;
-    pMonitor->m_transformedSize = savedTransformedSize;
 
     PMONITOR->m_activeWorkspace = startedOn;
     startedOn->m_visible        = true;
