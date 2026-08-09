@@ -20,6 +20,39 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <sys/wait.h>
+#include <unistd.h>
+
+// Runs `hyprctl dispatch <dispatcher> <arg>` in a detached, double-forked
+// child so it executes on Hyprland's normal IPC path, fully decoupled from
+// this call site and this frame. Used specifically for cross-monitor
+// workspace swaps: performing that swap in-process, mid-overview-close,
+// interacts badly with the overview's own repeated off-screen rendering of
+// the other monitor's tiles (observed as persistent blank/offset rendering
+// on that monitor after the swap). Deferring it lets the swap run only after
+// the overview and its renders have fully torn down.
+static void dispatchAsync(const std::string& dispatcher, const std::string& arg) {
+    const pid_t pid = fork();
+    if (pid < 0) {
+        Log::logger->log(Log::ERR, "[hyprexpo] fork failed for async dispatch");
+        return;
+    }
+
+    if (pid == 0) {
+        // First child: detach, then fork again so the grandchild running
+        // hyprctl gets reparented to init and never becomes our zombie.
+        setsid();
+        const pid_t grandchild = fork();
+        if (grandchild == 0) {
+            execlp("hyprctl", "hyprctl", "dispatch", dispatcher.c_str(), arg.c_str(), nullptr);
+            _exit(127);
+        }
+        _exit(0);
+    }
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+}
 
 void COverview::redrawID(int id, bool forcelowres) {
     const auto MON = pMonitor.lock();
@@ -151,48 +184,27 @@ void COverview::close(bool switchToSelection) {
             }
         }
 
-        const auto OLDWS    = MON->m_activeWorkspace;
-        // Captured before the swap: this is the monitor OLDWS will land on
-        // when changeWorkspaceOnCurrentMonitor swaps it out from under MON.
-        const auto OTHERMON = NEWIDWS ? NEWIDWS->m_monitor.lock() : nullptr;
+        const auto OLDWS            = MON->m_activeWorkspace;
+        const auto NEWWSMONITOR     = NEWIDWS ? NEWIDWS->m_monitor.lock() : nullptr;
+        const bool crossMonitorSwap = NEWIDWS && NEWWSMONITOR && NEWWSMONITOR != MON;
 
-        // Use changeWorkspaceOnCurrentMonitor so selecting a tile whose
-        // workspace lives on another monitor brings it to the monitor the
-        // overview was opened on, rather than just moving focus over there
-        // (matches the `on_current_monitor` workspace dispatch flag).
-        const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspaceOnCurrentMonitor(NEWIDWS);
-        if (!CHANGE)
-            Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+        if (crossMonitorSwap) {
+            // Defer to an external hyprctl call (see dispatchAsync above)
+            // instead of changeWorkspaceOnCurrentMonitor in-process: by the
+            // time it actually runs, the overview (and its per-frame off-
+            // screen rendering of the other monitor) will have fully closed,
+            // so there's no more interference to corrupt the swap.
+            dispatchAsync("focusworkspaceoncurrentmonitor", NEWIDWS->getConfigName());
+        } else {
+            const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspaceOnCurrentMonitor(NEWIDWS);
+            if (!CHANGE)
+                Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
 
-        else if (NEWIDWS) {
-            // changeWorkspaceOnCurrentMonitor has a known upstream focus-desync
-            // bug when it swaps a workspace onto the current monitor (Hyprland
-            // issue #4626): the active border and keyboard input can end up
-            // pointed at the wrong monitor. Explicitly re-focusing MON afterward
-            // mirrors the community workaround of manually refocusing a window.
-            (void)Config::Actions::focusMonitor(MON);
+            Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
+            Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
 
-            // The overview keeps rendering every monitor's tiles off-screen for
-            // the whole time it's open, which can leave the monitor that just
-            // received OLDWS with a stale layout/paint after the swap (windows
-            // offset, or a blank screen) until something forces a fresh
-            // recalculation - this is what manually switching workspaces there
-            // and back does; do it programmatically for both monitors instead.
-            restoreActiveWorkspaceAfterPreview(MON, MON->m_activeWorkspace);
-            g_pHyprRenderer->damageMonitor(MON);
-            MON->scheduleFrame();
-
-            if (OTHERMON && OTHERMON != MON) {
-                restoreActiveWorkspaceAfterPreview(OTHERMON, OLDWS);
-                g_pHyprRenderer->damageMonitor(OTHERMON);
-                OTHERMON->scheduleFrame();
-            }
+            startedOn = MON->m_activeWorkspace;
         }
-
-        Animation::Workspace::startAnimation(MON->m_activeWorkspace, Animation::Workspace::ANIMATION_TYPE_IN, true, true);
-        Animation::Workspace::startAnimation(OLDWS, Animation::Workspace::ANIMATION_TYPE_OUT, false, true);
-
-        startedOn = MON->m_activeWorkspace;
     }
 
     size->setCallbackOnEnd(removeOverview);
