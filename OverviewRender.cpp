@@ -165,10 +165,25 @@ void COverview::close(bool switchToSelection) {
             // geometry (rendered blank, or offset by the size difference between
             // monitors). Call the same underlying primitive that dispatcher uses,
             // but with both monitors explicit and unambiguous.
-            if (OTHERMON->activeWorkspaceID() == NEWIDWS->m_id)
+            if (OTHERMON->activeWorkspaceID() == NEWIDWS->m_id) {
+                // Already the active workspace on OTHERMON: swapActiveWorkspaces
+                // directly sets both monitors' m_activeWorkspace, so this alone
+                // finishes the switch.
                 State::workspacePlacementController()->swapActiveWorkspaces(OTHERMON, MON);
-            else
+            } else {
+                // Not currently visible on OTHERMON: moveWorkspaceToMonitor only
+                // relocates ownership (workspace->m_monitor) here - it only makes
+                // the workspace active on the destination monitor if it was
+                // already active on its old one, which by construction it isn't
+                // in this branch. Without an explicit follow-up switch, the
+                // workspace silently becomes ours without ever being displayed,
+                // requiring a second attempt (now same-monitor) to actually see
+                // it.
                 State::workspacePlacementController()->moveWorkspaceToMonitor(NEWIDWS, MON, true);
+                const auto CHANGE = Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
+                if (!CHANGE)
+                    Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
+            }
 
             (void)Config::Actions::focusMonitor(MON);
         } else {
