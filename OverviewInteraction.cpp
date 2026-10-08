@@ -233,6 +233,29 @@ void COverview::updateWindowDrag() {
     damage();
 }
 
+bool COverview::isDropTargetTile(int id) const {
+    // Padding tiles (WORKSPACE_INVALID) are valid drop targets: dropping on
+    // one creates a fresh workspace for it, like clicking an empty tile does.
+    return id >= 0 && id < (int)images.size();
+}
+
+void COverview::assignWorkspaceToEmptyTile(int id) {
+    if (id < 0 || id >= (int)images.size() || images[id].workspaceID != WORKSPACE_INVALID)
+        return;
+
+    // Same resolution as selecting an empty tile, but never reuse an ID that
+    // another tile already shows (e.g. an empty active workspace).
+    int64_t newID = getWorkspaceIDNameFromString("emptynm").id;
+    if (newID == WORKSPACE_INVALID || newID <= 0 || tileForWorkspaceID(newID) != -1) {
+        newID = 1;
+        while (tileForWorkspaceID(newID) != -1)
+            ++newID;
+    }
+
+    images[id].workspaceID = newID;
+    images[id].pWorkspace  = nullptr;
+}
+
 PHLWORKSPACE COverview::ensureWorkspaceForTile(int id) {
     if (!isTileValid(id))
         return nullptr;
@@ -281,7 +304,7 @@ bool COverview::finishWindowDrag() {
     updateHoveredFromMouse();
 
     const int TARGET = hoveredID;
-    if (!isTileValid(SOURCE) || !isTileValid(TARGET) || SOURCE == TARGET)
+    if (!isTileValid(SOURCE) || !isDropTargetTile(TARGET) || SOURCE == TARGET)
         return true;
 
     PHLWORKSPACE SOURCEWS;
@@ -297,9 +320,13 @@ bool COverview::finishWindowDrag() {
         }
     }
 
+    if (!windowVisibleOnWorkspace(WINDOW, SOURCEWS))
+        return true;
+
+    assignWorkspaceToEmptyTile(TARGET);
     const auto TARGETWS = ensureWorkspaceForTile(TARGET);
 
-    if (!windowVisibleOnWorkspace(WINDOW, SOURCEWS) || !TARGETWS || TARGETWS == SOURCEWS)
+    if (!TARGETWS || TARGETWS == SOURCEWS)
         return true;
 
     images[SOURCE].pWorkspace = SOURCEWS;

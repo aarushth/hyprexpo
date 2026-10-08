@@ -90,6 +90,8 @@ class COverview {
     PHLWINDOW  windowAtTilePoint(int id, const Vector2D& localPoint) const;
     Vector2D   tilePointToWorkspacePoint(int id, const Vector2D& localPoint) const;
     PHLWORKSPACE ensureWorkspaceForTile(int id);
+    bool         isDropTargetTile(int id) const;
+    void         assignWorkspaceToEmptyTile(int id);
     void       enterSubmapIfEnabled();
     void       resetSubmapIfNeeded();
 

@@ -460,7 +460,7 @@ void COverview::fullRender() {
             const int autoRound     = std::min(RND_FOC, maxProxyRound);
             const int round         = **PDRAGPROXYROUND >= 0 ? std::min(std::max(0, (int)std::lround((double)**PDRAGPROXYROUND * MON->m_scale)), maxProxyRound) : autoRound;
 
-            if (dragMoved && hoveredID != -1 && hoveredID != dragSourceID && isTileValid(hoveredID)) {
+            if (dragMoved && hoveredID != -1 && hoveredID != dragSourceID && isDropTargetTile(hoveredID)) {
                 const int tx = hoveredID % SIDE_LENGTH;
                 const int ty = hoveredID / SIDE_LENGTH;
                 const Hyprexpo::SRect targetTileLocal{
