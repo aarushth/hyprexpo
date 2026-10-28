@@ -17,12 +17,23 @@
 // hyprland's fault, but cba to fix.
 constexpr bool ENABLE_LOWRES = false;
 
+namespace Render {
+    class CRenderContext;
+}
+
+// Tiles identify workspaces by selector ("3", "name:foo"): since Hyprland 0.57
+// named workspaces have no numeric ID. Empty means a padding tile.
+std::string  workspaceSelector(const PHLWORKSPACE& workspace);
+PHLWORKSPACE findWorkspaceBySelector(const std::string& selector);
+// Selector of the next empty numbered workspace (the "emptynm" rule), or empty on failure.
+std::string emptyWorkspaceSelector();
+
 class COverview {
   public:
     COverview(PHLWORKSPACE startedOn_, bool swipe = false);
     ~COverview();
 
-    void render();
+    void render(Render::CRenderContext& ctx);
     void damage();
     void onDamageReported();
     void onPreRender();
@@ -51,8 +62,8 @@ class COverview {
     void          onKbSelectNumber(int num);
     void          onKbSelectToken(int visibleIdx);
     bool          selectVisibleToken(const std::string& token);
-    int64_t       selectedWorkspaceID() const;
-    bool          selectWorkspaceByID(int64_t workspaceID);
+    std::string   selectedWorkspace() const;
+    bool          selectWorkspace(const std::string& selector);
     bool          selectVisibleIndex(size_t index);
     bool          moveWindowBetweenVisibleIndices(size_t sourceIndex, size_t targetIndex, const PHLWINDOW& window = nullptr);
 
@@ -64,7 +75,7 @@ class COverview {
 
     struct SWorkspaceImage {
         SP<Render::IFramebuffer> fb;
-        int64_t                  workspaceID = -1;
+        std::string              workspace;
         PHLWORKSPACE             pWorkspace;
         CBox                     box;
     };
@@ -73,13 +84,13 @@ class COverview {
     void       redrawID(int id, bool forcelowres = false);
     void       redrawAll(bool forcelowres = false);
     void       onWorkspaceChange();
-    void       fullRender();
+    void       fullRender(Render::CRenderContext& ctx);
     void       updateHoveredFromMouse();
     void       ensureKbFocusInitialized();
     bool       isTileValid(int id) const;
     void       moveFocus(int dx, int dy);
     void       moveFocusLinear(int step);
-    int        tileForWorkspaceID(int wsid) const;
+    int        tileForWorkspace(const std::string& selector) const;
     int        tileForVisibleIndex(int vIdx) const;
     void       beginWindowDrag();
     bool       finishWindowDrag();

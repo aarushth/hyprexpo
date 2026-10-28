@@ -9,9 +9,9 @@
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/GlobalWindowController.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/output/Monitor.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/keybinds/Resolver.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
@@ -131,7 +131,7 @@ static PHLWINDOW windowToBringFromWorkspace(const PHLWORKSPACE& workspace) {
     const auto& windows = Desktop::windowState()->windows();
     for (auto it = windows.rbegin(); it != windows.rend(); ++it) {
         const auto& window = *it;
-        if (!window || window->m_workspace != workspace || !window->m_isMapped || window->isHidden())
+        if (!window || window->m_workspace != workspace || !window->mapped() || window->isHidden())
             continue;
 
         return window;
@@ -140,8 +140,8 @@ static PHLWINDOW windowToBringFromWorkspace(const PHLWORKSPACE& workspace) {
     return nullptr;
 }
 
-static SDispatchResult bringWindowFromWorkspace(int64_t sourceWorkspaceID) {
-    if (sourceWorkspaceID == WORKSPACE_INVALID)
+static SDispatchResult bringWindowFromWorkspace(const std::string& sourceWorkspace) {
+    if (sourceWorkspace.empty())
         return {.success = false, .error = "selected workspace is empty"};
 
     const auto focusState = Desktop::focusState();
@@ -149,20 +149,14 @@ static SDispatchResult bringWindowFromWorkspace(int64_t sourceWorkspaceID) {
     if (!monitor || !monitor->m_activeWorkspace)
         return {.success = false, .error = "no active monitor/workspace"};
 
-    if (sourceWorkspaceID == monitor->activeWorkspaceID())
+    if (sourceWorkspace == workspaceSelector(monitor->m_activeWorkspace))
         return {};
 
-    PHLWORKSPACE sourceWorkspace;
-    for (const auto& w : State::workspaceState()->workspacesCopy()) {
-        if (w->m_id == sourceWorkspaceID) {
-            sourceWorkspace = w;
-            break;
-        }
-    }
-    if (!sourceWorkspace)
+    const auto SOURCEWS = findWorkspaceBySelector(sourceWorkspace);
+    if (!SOURCEWS)
         return {.success = false, .error = "selected workspace is not open"};
 
-    const auto window = windowToBringFromWorkspace(sourceWorkspace);
+    const auto window = windowToBringFromWorkspace(SOURCEWS);
     if (!window)
         return {.success = false, .error = "selected workspace has no mapped windows"};
 
@@ -178,10 +172,8 @@ static bool isSingleDigitWorkspaceArg(const std::string& arg) {
 }
 
 static SDispatchResult changeToSingleDigitWorkspace(const std::string& arg) {
-    const int workspaceID = arg[0] - '0';
-
     if (g_pOverview) {
-        if (g_pOverview->selectWorkspaceByID(workspaceID)) {
+        if (g_pOverview->selectWorkspace(arg)) {
             g_pOverview->close();
             return {};
         }
@@ -426,7 +418,7 @@ static SDispatchResult onExpoDispatcher(std::string arg) {
     if (arg == "bring") {
         if (g_pOverview) {
             g_pOverview->selectHoveredWorkspace();
-            const auto result = bringWindowFromWorkspace(g_pOverview->selectedWorkspaceID());
+            const auto result = bringWindowFromWorkspace(g_pOverview->selectedWorkspace());
             g_pOverview->close(false);
             return result;
         }
@@ -483,9 +475,9 @@ static SDispatchResult registerExpoGesture(int fingerCount, const std::string& d
     if (direction == TRACKPAD_GESTURE_DIR_NONE)
         return {.success = false, .error = std::format("invalid direction '{}'", directionName)};
 
-    uint32_t modMask = 0;
+    Input::ModifierMask modMask = Input::HL_MODIFIER_NONE;
     if (!mods.empty())
-        modMask = g_pKeybindManager->stringToModMask(mods);
+        modMask = Keybinds::modMaskFromString(mods);
 
     deltaScale = std::clamp(deltaScale, 0.1F, 10.F);
 

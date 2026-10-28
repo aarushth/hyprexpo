@@ -48,7 +48,7 @@ class CPinnedWindowPreviewGuard {
     std::vector<SPinnedWindowPreviewState> m_states;
 };
 
-void clearWithColor(const CHyprColor& color);
+void clearWithColor(Render::CRenderContext& ctx, const CHyprColor& color);
 uint32_t framebufferFormatWithAlpha(uint32_t drmFormat);
 bool isTransformRotated(wl_output_transform t);
 
@@ -77,4 +77,4 @@ void restoreWorkspaceWindowGoalState(const std::vector<SWindowPreviewState>& sta
 PHLWORKSPACE activateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
 void restoreActiveWorkspaceAfterPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
 void removeOverview(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr);
-PHLWORKSPACE captureWorkspaceTile(PHLMONITOR fallbackMonitor, COverview::SWorkspaceImage& image, const PHLWORKSPACE& startedOn);
+PHLWORKSPACE captureWorkspaceTile(PHLMONITOR fallbackMonitor, COverview::SWorkspaceImage& image, const PHLWORKSPACE& startedOn, bool blockSurfaceFeedback = false);

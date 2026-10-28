@@ -25,15 +25,15 @@
 inline CFunctionHook* g_pRenderWorkspaceHook = nullptr;
 inline CFunctionHook* g_pAddDamageHookA      = nullptr;
 inline CFunctionHook* g_pAddDamageHookB      = nullptr;
-typedef void (*origRenderWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
+typedef void (*origRenderWorkspace)(void*, Render::CRenderContext&, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
 typedef void (*origAddDamageA)(void*, const CBox&);
 typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
 
-static void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
+static void hkRenderWorkspace(void* thisptr, Render::CRenderContext& ctx, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
     if (!g_pOverview || isRenderingOverview() || g_pOverview->blockOverviewRendering || !g_pOverview->shouldRenderOverviewForMonitor(pMonitor))
-        ((origRenderWorkspace)(g_pRenderWorkspaceHook->m_original))(thisptr, pMonitor, pWorkspace, now, geometry);
+        ((origRenderWorkspace)(g_pRenderWorkspaceHook->m_original))(thisptr, ctx, pMonitor, pWorkspace, now, geometry);
     else
-        g_pOverview->render();
+        g_pOverview->render(ctx);
 }
 
 static void hkAddDamageA(void* thisptr, const CBox& box) {
@@ -76,7 +76,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[he] Version mismatch");
     }
 
+    // renderWorkspace is overloaded; hook the (monitor, workspace, time, geometry) one.
     auto FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "renderWorkspace");
+    std::erase_if(FNS, [](const SFunctionMatch& fn) { return !fn.demangled.contains("CBox"); });
     if (FNS.empty()) {
         failNotif("no fns for hook renderWorkspace");
         throw std::runtime_error("[he] No fns for hook renderWorkspace");
@@ -137,7 +139,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
 APICALL EXPORT void PLUGIN_EXIT() {
     g_pOverview.reset();
-    g_pHyprRenderer->m_renderPass.removeAllOfType("COverviewPassElement");
+    Render::IHyprRenderer::currentPass(g_pHyprRenderer->context()).removeAllOfType("COverviewPassElement");
 
     Config::mgr()->reload(); // we need to reload now to clear all the gestures
     resetDispatcherRuntime();

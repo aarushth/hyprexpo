@@ -8,14 +8,14 @@ class COverviewPassElement : public IPassElement {
     COverviewPassElement();
     virtual ~COverviewPassElement() = default;
 
-    virtual std::vector<UP<IPassElement>> draw();
-    virtual bool                          needsLiveBlur();
-    virtual bool                          needsPrecomputeBlur();
-    virtual std::optional<CBox>           boundingBox();
-    virtual CRegion                       opaqueRegion();
-    virtual ePassElementType              type();
+    virtual std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override;
+    virtual bool                          needsLiveBlur(Render::CRenderContext& ctx) override;
+    virtual bool                          needsPrecomputeBlur(Render::CRenderContext& ctx) override;
+    virtual std::optional<CBox>           boundingBox(Render::CRenderContext& ctx) override;
+    virtual CRegion                       opaqueRegion(Render::CRenderContext& ctx) override;
+    virtual ePassElementType              type() override;
 
-    virtual const char*                   passName() {
+    virtual const char*                   passName() override {
         return "COverviewPassElement";
     }
 };

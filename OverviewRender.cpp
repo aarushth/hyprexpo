@@ -136,21 +136,15 @@ void COverview::close(bool switchToSelection) {
 
     redrawAll();
 
-    if (switchToSelection && TILE.workspaceID != MON->activeWorkspaceID()) {
-        MON->setSpecialWorkspace(0);
+    if (switchToSelection && TILE.workspace != workspaceSelector(MON->m_activeWorkspace)) {
+        MON->setSpecialWorkspace(nullptr);
 
-        // If this tile's workspace was WORKSPACE_INVALID, move to the next
+        // If this tile is a padding tile (empty selector), move to the next
         // empty workspace. This should only happen if skip_empty is on, in
-        // which case some tiles will be left with this ID intentionally.
-        const int  NEWID = TILE.workspaceID == WORKSPACE_INVALID ? getWorkspaceIDNameFromString("emptynm").id : TILE.workspaceID;
+        // which case some tiles will be left without a workspace intentionally.
+        const auto   NEWSELECTOR = TILE.workspace.empty() ? emptyWorkspaceSelector() : TILE.workspace;
 
-        PHLWORKSPACE NEWIDWS;
-        for (const auto& w : State::workspaceState()->workspacesCopy()) {
-            if (w->m_id == NEWID) {
-                NEWIDWS = w;
-                break;
-            }
-        }
+        PHLWORKSPACE NEWIDWS = findWorkspaceBySelector(NEWSELECTOR);
 
         const auto OLDWS            = MON->m_activeWorkspace;
         const auto OTHERMON         = NEWIDWS ? NEWIDWS->m_monitor.lock() : nullptr;
@@ -165,7 +159,7 @@ void COverview::close(bool switchToSelection) {
             // geometry (rendered blank, or offset by the size difference between
             // monitors). Call the same underlying primitive that dispatcher uses,
             // but with both monitors explicit and unambiguous.
-            if (OTHERMON->activeWorkspaceID() == NEWIDWS->m_id) {
+            if (OTHERMON->m_activeWorkspace == NEWIDWS) {
                 // Already the active workspace on OTHERMON: swapActiveWorkspaces
                 // directly sets both monitors' m_activeWorkspace, so this alone
                 // finishes the switch.
@@ -180,14 +174,14 @@ void COverview::close(bool switchToSelection) {
                 // requiring a second attempt (now same-monitor) to actually see
                 // it.
                 State::workspacePlacementController()->moveWorkspaceToMonitor(NEWIDWS, MON, true);
-                const auto CHANGE = Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
+                const auto CHANGE = Config::Actions::changeWorkspace(workspaceSelector(NEWIDWS));
                 if (!CHANGE)
                     Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
             }
 
             (void)Config::Actions::focusMonitor(MON);
         } else {
-            const auto CHANGE = !NEWIDWS ? Config::Actions::changeWorkspace(std::to_string(NEWID)) : Config::Actions::changeWorkspace(NEWIDWS->getConfigName());
+            const auto CHANGE = Config::Actions::changeWorkspace(NEWIDWS ? workspaceSelector(NEWIDWS) : NEWSELECTOR);
             if (!CHANGE)
                 Log::logger->log(Log::ERR, "[hyprexpo] failed to change workspace: {}", CHANGE.error().message);
         }
@@ -233,7 +227,7 @@ void COverview::onWorkspaceChange() {
     // doesn't (e.g. an out-of-band workspace switch to an ID that didn't
     // exist when the overview opened), openedID keeps its previous value.
     for (size_t i = 0; i < (size_t)(SIDE_LENGTH * SIDE_LENGTH); ++i) {
-        if (images[i].workspaceID != MON->activeWorkspaceID())
+        if (images[i].workspace != workspaceSelector(MON->m_activeWorkspace))
             continue;
 
         openedID = i;
@@ -244,8 +238,8 @@ void COverview::onWorkspaceChange() {
     close();
 }
 
-void COverview::render() {
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewPassElement>());
+void COverview::render(Render::CRenderContext& ctx) {
+    g_pHyprRenderer->addPassElement(ctx, makeUnique<COverviewPassElement>());
 }
 
 bool COverview::shouldRenderOverviewForMonitor(const PHLMONITOR& monitor) const {
@@ -262,7 +256,7 @@ bool COverview::shouldRenderOverviewForMonitor(const PHLMONITOR& monitor) const 
     return true;
 }
 
-void COverview::fullRender() {
+void COverview::fullRender(Render::CRenderContext& ctx) {
     const auto MON = pMonitor.lock();
     if (!MON)
         return;
@@ -282,7 +276,7 @@ void COverview::fullRender() {
     Vector2D tileSize       = (SIZE / SIDE_LENGTH);
     Vector2D tileRenderSize = (SIZE - Vector2D{GAPSIZE, GAPSIZE} * (SIDE_LENGTH - 1) - Vector2D{OUTER * 2, OUTER * 2}) / SIDE_LENGTH;
 
-    clearWithColor(BG_COLOR.stripA());
+    clearWithColor(ctx, BG_COLOR.stripA());
 
     static auto* const* PTILEROUND = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:tile_rounding")->getDataStaticPtr();
     static auto* const* PTOUNDPWR  = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:tile_rounding_power")->getDataStaticPtr();
@@ -323,7 +317,7 @@ void COverview::fullRender() {
             // no shadow in this branch
 
             CRegion damage{0, 0, INT16_MAX, INT16_MAX};
-            Render::GL::g_pHyprOpenGL->renderTextureInternal(images[id].fb->getTexture(), texbox, {.damage = &damage, .a = 1.0, .round = tileRound, .roundingPower = ROUND_PWR});
+            Render::GL::g_pHyprOpenGL->renderTextureInternal(ctx, images[id].fb->getTexture(), texbox, {.damage = &damage, .a = 1.0, .round = tileRound, .roundingPower = ROUND_PWR});
         }
     }
 
@@ -379,13 +373,13 @@ void COverview::fullRender() {
                 grad.m_colors.push_back(spec.c2);
                 grad.m_angle = spec.angleDeg * (float)M_PI / 180.f;
                 grad.updateColorsOk();
-                Render::GL::g_pHyprOpenGL->renderBorder(box, grad, {.round = roundScaled, .roundingPower = ROUND_PWR, .borderSize = BWIDTH});
+                Render::GL::g_pHyprOpenGL->renderBorder(ctx, box, grad, {.round = roundScaled, .roundingPower = ROUND_PWR, .borderSize = BWIDTH});
             }
         } else if (!effectiveSpec.empty()) {
             Hyprexpo::SColorRGBA parsedColor;
             if (Hyprexpo::parseSolidColorSpec(effectiveSpec, parsedColor)) {
                 CHyprColor color{parsedColor.r, parsedColor.g, parsedColor.b, parsedColor.a};
-                Render::GL::g_pHyprOpenGL->renderBorder(box, color, {.round = roundScaled, .roundingPower = ROUND_PWR, .borderSize = BWIDTH});
+                Render::GL::g_pHyprOpenGL->renderBorder(ctx, box, color, {.round = roundScaled, .roundingPower = ROUND_PWR, .borderSize = BWIDTH});
             } else {
                 Log::logger->log(Log::ERR, "[hyprexpo] invalid border color config: {}", effectiveSpec);
             }
@@ -411,7 +405,7 @@ void COverview::fullRender() {
             grad.m_colors.push_back(spec.c2);
             grad.m_angle = spec.angleDeg * (float)M_PI / 180.f;
             grad.updateColorsOk();
-            Render::GL::g_pHyprOpenGL->renderBorder(proxy, grad, {.round = round, .roundingPower = ROUND_PWR, .borderSize = borderWidth});
+            Render::GL::g_pHyprOpenGL->renderBorder(ctx, proxy, grad, {.round = round, .roundingPower = ROUND_PWR, .borderSize = borderWidth});
             return;
         }
 
@@ -419,7 +413,7 @@ void COverview::fullRender() {
         if (Hyprexpo::parseSolidColorSpec(effectiveSpec, parsedColor)) {
             Config::CGradientValueData grad{CHyprColor{parsedColor.r, parsedColor.g, parsedColor.b, parsedColor.a}};
             grad.updateColorsOk();
-            Render::GL::g_pHyprOpenGL->renderBorder(proxy, grad, {.round = round, .roundingPower = ROUND_PWR, .borderSize = borderWidth});
+            Render::GL::g_pHyprOpenGL->renderBorder(ctx, proxy, grad, {.round = round, .roundingPower = ROUND_PWR, .borderSize = borderWidth});
         } else
             Log::logger->log(Log::ERR, "[hyprexpo] invalid drag_drop_proxy_border_color config: {}", effectiveSpec);
     };
@@ -493,14 +487,14 @@ void COverview::fullRender() {
                 const int targetMaxRound = std::max(0, (int)std::floor(std::min(targetProxy.w, targetProxy.h) / 2.0));
                 const int targetRound    = **PDRAGPROXYROUND >= 0 ? std::min(std::max(0, (int)std::lround((double)**PDRAGPROXYROUND * MON->m_scale)), targetMaxRound) :
                                                                    std::min(RND_FOC, targetMaxRound);
-                Render::GL::g_pHyprOpenGL->renderRect(targetProxy, CHyprColor{(uint64_t)**PDRAGPROXYACTCOL}, {.round = targetRound, .roundingPower = ROUND_PWR});
+                Render::GL::g_pHyprOpenGL->renderRect(ctx, targetProxy, CHyprColor{(uint64_t)**PDRAGPROXYACTCOL}, {.round = targetRound, .roundingPower = ROUND_PWR});
 
                 const int   borderWidth   = **PDRAGPROXYBWIDTH >= 0 ? **PDRAGPROXYBWIDTH : std::max(2, (int)**PBWIDTH + 1);
                 const std::string effectiveSpec = std::string{*PDRAGPROXYBORDER}.empty() ? std::string{*PBCOLFOC} : std::string{*PDRAGPROXYBORDER};
                 drawProxyBorder(targetProxy, targetRound, borderWidth, effectiveSpec, std::string{*PBGREFOC});
             }
 
-            Render::GL::g_pHyprOpenGL->renderRect(proxy, CHyprColor{(uint64_t)(dragMoved ? **PDRAGPROXYACTCOL : **PDRAGPROXYCOL)}, {.round = round, .roundingPower = ROUND_PWR});
+            Render::GL::g_pHyprOpenGL->renderRect(ctx, proxy, CHyprColor{(uint64_t)(dragMoved ? **PDRAGPROXYACTCOL : **PDRAGPROXYCOL)}, {.round = round, .roundingPower = ROUND_PWR});
 
             const int   borderWidth   = **PDRAGPROXYBWIDTH >= 0 ? **PDRAGPROXYBWIDTH : std::max(2, (int)**PBWIDTH + 1);
             std::string effectiveSpec = std::string{*PDRAGPROXYBORDER}.empty() ? std::string{*PBCOLFOC} : std::string{*PDRAGPROXYBORDER};

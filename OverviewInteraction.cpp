@@ -4,11 +4,13 @@
 #include "HyprexpoLogic.hpp"
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
+#include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/desktop/state/GlobalWindowController.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
+#include <hyprland/src/state/workspace/Resolver.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -23,20 +25,20 @@ void COverview::selectHoveredWorkspace() {
     closeOnID = std::clamp(hoveredID, 0, SIDE_LENGTH * SIDE_LENGTH - 1);
 }
 
-int64_t COverview::selectedWorkspaceID() const {
+std::string COverview::selectedWorkspace() const {
     const int id = closeOnID == -1 ? openedID : closeOnID;
     if (id < 0 || id >= (int)images.size())
-        return WORKSPACE_INVALID;
+        return {};
 
-    return images[id].workspaceID;
+    return images[id].workspace;
 }
 
-bool COverview::selectWorkspaceByID(int64_t workspaceID) {
-    if (closing)
+bool COverview::selectWorkspace(const std::string& selector) {
+    if (closing || selector.empty())
         return false;
 
     for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i].workspaceID != workspaceID)
+        if (images[i].workspace != selector)
             continue;
 
         closeOnID = i;
@@ -52,7 +54,7 @@ bool COverview::selectVisibleIndex(size_t index) {
 
     size_t visible = 0;
     for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i].workspaceID == WORKSPACE_INVALID)
+        if (images[i].workspace.empty())
             continue;
 
         if (visible == index) {
@@ -96,12 +98,12 @@ void COverview::ensureKbFocusInitialized() {
 bool COverview::isTileValid(int id) const {
     if (id < 0 || id >= (int)images.size())
         return false;
-    return images[id].workspaceID != WORKSPACE_INVALID;
+    return !images[id].workspace.empty();
 }
 
-int COverview::tileForWorkspaceID(int wsid) const {
+int COverview::tileForWorkspace(const std::string& selector) const {
     for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i].workspaceID == wsid)
+        if (images[i].workspace == selector)
             return (int)i;
     }
     return -1;
@@ -112,7 +114,7 @@ int COverview::tileForVisibleIndex(int vIdx) const {
         return -1;
     int seen = 0;
     for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i].workspaceID == WORKSPACE_INVALID)
+        if (images[i].workspace.empty())
             continue;
         if (seen == vIdx)
             return (int)i;
@@ -138,12 +140,7 @@ Vector2D COverview::tilePointToWorkspacePoint(int id, const Vector2D& localPoint
     if (id >= 0 && id < (int)images.size()) {
         PHLWORKSPACE workspace = images[id].pWorkspace;
         if (!workspace) {
-            for (const auto& w : State::workspaceState()->workspacesCopy()) {
-                if (w->m_id == images[id].workspaceID) {
-                    workspace = w;
-                    break;
-                }
-            }
+            workspace = findWorkspaceBySelector(images[id].workspace);
         }
         if (workspace) {
             if (const auto owner = workspace->m_monitor.lock())
@@ -174,12 +171,7 @@ PHLWINDOW COverview::windowAtTilePoint(int id, const Vector2D& localPoint) const
         WORKSPACE = images[id].pWorkspace;
     }
     else {
-        for (const auto& w : State::workspaceState()->workspacesCopy()) {
-            if (w->m_id == images[id].workspaceID) {
-                WORKSPACE = w;
-                break;
-            }
-        }
+        WORKSPACE = findWorkspaceBySelector(images[id].workspace);
     }
 
     if (!WORKSPACE)
@@ -234,25 +226,26 @@ void COverview::updateWindowDrag() {
 }
 
 bool COverview::isDropTargetTile(int id) const {
-    // Padding tiles (WORKSPACE_INVALID) are valid drop targets: dropping on
+    // Padding tiles (empty selector) are valid drop targets: dropping on
     // one creates a fresh workspace for it, like clicking an empty tile does.
     return id >= 0 && id < (int)images.size();
 }
 
 void COverview::assignWorkspaceToEmptyTile(int id) {
-    if (id < 0 || id >= (int)images.size() || images[id].workspaceID != WORKSPACE_INVALID)
+    if (id < 0 || id >= (int)images.size() || !images[id].workspace.empty())
         return;
 
     // Same resolution as selecting an empty tile, but never reuse an ID that
     // another tile already shows (e.g. an empty active workspace).
-    int64_t newID = getWorkspaceIDNameFromString("emptynm").id;
-    if (newID == WORKSPACE_INVALID || newID <= 0 || tileForWorkspaceID(newID) != -1) {
-        newID = 1;
-        while (tileForWorkspaceID(newID) != -1)
+    std::string selector = emptyWorkspaceSelector();
+    if (selector.empty() || tileForWorkspace(selector) != -1) {
+        uint32_t newID = 1;
+        while (tileForWorkspace(std::to_string(newID)) != -1)
             ++newID;
+        selector = std::to_string(newID);
     }
 
-    images[id].workspaceID = newID;
+    images[id].workspace = selector;
     images[id].pWorkspace  = nullptr;
 }
 
@@ -269,15 +262,15 @@ PHLWORKSPACE COverview::ensureWorkspaceForTile(int id) {
         return image.pWorkspace;
 
     PHLWORKSPACE workspace;
-    for (const auto& w : State::workspaceState()->workspacesCopy()) {
-        if (w->m_id == image.workspaceID) {
-            workspace = w;
-            break;
-        }
-    }
+    workspace = findWorkspaceBySelector(image.workspace);
 
-    if (!workspace)
-        workspace = State::workspaceState()->create(image.workspaceID, MON->m_id, std::to_string(image.workspaceID), false);
+    if (!workspace) {
+        const auto TARGET = State::Workspace::resolver()->getWorkspaceTargetFromString(image.workspace, MON);
+        if (TARGET.valid())
+            workspace = State::workspaceState()->create(TARGET, MON, false);
+        if (workspace)
+            workspace->ready();
+    }
 
     image.pWorkspace = workspace;
     return workspace;
@@ -312,12 +305,7 @@ bool COverview::finishWindowDrag() {
         SOURCEWS = images[SOURCE].pWorkspace;
     }
     else {
-        for (const auto& w : State::workspaceState()->workspacesCopy()) {
-            if (w->m_id == images[SOURCE].workspaceID) {
-                SOURCEWS = w;
-                break;
-            }
-        }
+        SOURCEWS = findWorkspaceBySelector(images[SOURCE].workspace);
     }
 
     if (!windowVisibleOnWorkspace(WINDOW, SOURCEWS))
@@ -350,12 +338,7 @@ bool COverview::moveWindowBetweenVisibleIndices(size_t sourceIndex, size_t targe
         SOURCEWS = images[SOURCE].pWorkspace;
     }
     else {
-        for (const auto& w : State::workspaceState()->workspacesCopy()) {
-            if (w->m_id == images[SOURCE].workspaceID) {
-                SOURCEWS = w;
-                break;
-            }
-        }
+        SOURCEWS = findWorkspaceBySelector(images[SOURCE].workspace);
     }
 
     const auto TARGETWS = ensureWorkspaceForTile(TARGET);
@@ -570,7 +553,7 @@ void COverview::onKbSelectNumber(int num) {
     if (num == 0)
         num = 10;
 
-    if (selectWorkspaceByID(num))
+    if (selectWorkspace(std::to_string(num)))
         close();
 }
 
@@ -688,14 +671,14 @@ void COverview::enterSubmapIfEnabled() {
     static auto* const* PKEYNAV = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprexpo:keynav_enable")->getDataStaticPtr();
     if (**PKEYNAV && !submapActive) {
         // switch to a dedicated submap for hyprexpo navigation
-        g_pKeybindManager->m_dispatchers["submap"]("hyprexpo");
+        (void)Config::Actions::setSubmap("hyprexpo");
         submapActive = true;
     }
 }
 
 void COverview::resetSubmapIfNeeded() {
     if (submapActive) {
-        g_pKeybindManager->m_dispatchers["submap"]("reset");
+        (void)Config::Actions::setSubmap("reset");
         submapActive = false;
     }
 }

@@ -6,23 +6,23 @@ COverviewPassElement::COverviewPassElement() {
     ;
 }
 
-std::vector<UP<IPassElement>> COverviewPassElement::draw() {
+std::vector<UP<IPassElement>> COverviewPassElement::draw(Render::CRenderContext& ctx) {
     if (!g_pOverview)
         return {};
 
-    g_pOverview->fullRender();
+    g_pOverview->fullRender(ctx);
     return {};
 }
 
-bool COverviewPassElement::needsLiveBlur() {
+bool COverviewPassElement::needsLiveBlur(Render::CRenderContext& ctx) {
     return false;
 }
 
-bool COverviewPassElement::needsPrecomputeBlur() {
+bool COverviewPassElement::needsPrecomputeBlur(Render::CRenderContext& ctx) {
     return false;
 }
 
-std::optional<CBox> COverviewPassElement::boundingBox() {
+std::optional<CBox> COverviewPassElement::boundingBox(Render::CRenderContext& ctx) {
     if (!g_pOverview)
         return std::nullopt;
 
@@ -33,7 +33,7 @@ std::optional<CBox> COverviewPassElement::boundingBox() {
     return CBox{{}, MON->m_size};
 }
 
-CRegion COverviewPassElement::opaqueRegion() {
+CRegion COverviewPassElement::opaqueRegion(Render::CRenderContext& ctx) {
     if (!g_pOverview)
         return CRegion{};
 
