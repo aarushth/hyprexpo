@@ -1,449 +1,353 @@
-# HyprExpo
+# hyprexpo
 
-HyprExpo is a maintained Hyprland plugin for an expose-style workspace overview: keyboard and pointer selection, drag-and-drop window movement between workspaces (including across monitors), configurable gaps and borders, and Lua-configured gestures.
+A workspace overview plugin for Hyprland. It shows one grid containing the workspaces from **all** your monitors, so you can jump between them, pull a workspace onto the current monitor, or drag windows from one workspace to another, with the keyboard, mouse, touchscreen or touchpad.
 
-If you experience any bugs, you are encouraged to [open an issue](https://github.com/sandwichfarm/hyprexpo/issues/new). Information I can use to reproduce a bug is appreciated.
+Tracks **Hyprland 0.57.0**. Hyprland 0.57 is configured in Lua, so all configuration here is Lua too.
 
-[Announcement Post](https://www.reddit.com/r/hyprland/comments/1o30dsg/hyprexpoplus_outer_gaps_keyboard_navigation_and/)
+## How it works
 
-## History
+The overview opens on the monitor under the cursor. Other monitors keep showing their normal contents.
 
-HyprExpo continues the original expose-style workspace overview plugin from the Hyprland plugins ecosystem. After [the upstream plugin was retired](https://github.com/hyprwm/hyprland-plugins/pull/507#issuecomment-4433386463) from official plugins, this fork signaled continuation and intends to chase Hyprland releases.
+**What's in the grid**
 
-Born from [a PR to the old official HyprExpo](https://github.com/hyprwm/hyprland-plugins/pull/507) and formerly known as HyprExpo+ (`hyprexpo-plus`), this has become the home for practical additions that make the overview more usable day to day: multi-monitor awareness, keyboard navigation, drag-and-drop window movement, and configurable gaps and borders.
-See the [upstream retirement context](https://github.com/hyprwm/hyprland-plugins/pull/663) and the [original launch announcement of this plugin](https://www.reddit.com/r/hyprland/comments/1o30dsg/hyprexpoplus_outer_gaps_keyboard_navigation_and/) for the project's well established background.
+- Every workspace that has windows, plus the workspace currently shown on each monitor, even if it's empty.
+- Named workspaces come first, then numbered workspaces in ascending order.
+- Special workspaces are never shown.
+- Any leftover tiles at the end are empty. There is always at least one, unless the workspace you opened from is already empty and can serve that purpose.
 
-## Related
+The grid is always square: its side is `ceil(sqrt(N))` tiles, with a minimum of 2x2.
 
-- https://github.com/colonelpanic8/hyprexpo - Another HyprExpo fork
+**What selecting a tile does**
 
-____
+| tile | result |
+| --- | --- |
+| Workspace on this monitor | Switches to it |
+| Workspace shown on another monitor | Swaps it with the workspace on this monitor |
+| Workspace on another monitor, not currently shown there | Moves it to this monitor and switches to it |
+| Empty tile | Switches to the next empty numbered workspace |
 
-## How It Works
+**Mouse and touch**
 
-Opening the overview shows a single square grid containing **every active workspace across every monitor** — "active" meaning it has windows, or it's the workspace currently shown on some monitor (so you never lose track of where you are, even on an empty workspace). Special workspaces are never shown. The grid always includes at least one empty, creatable slot unless the workspace you opened the overview from is itself already empty.
+- Click a tile with any mouse button to select it.
+- Drag a window onto another tile to move it there, including onto empty tiles and workspaces from other monitors. A drag starts after 12px of movement, and the overview stays open afterwards so you can keep moving windows.
+- Tap a tile on a touchscreen to select it. Dragging windows by touch isn't supported.
 
-The grid auto-sizes to fit: `columns = rows = ceil(sqrt(N))`, with a floor of 2x2.
+**Keyboard**
 
-- **Selecting a tile** on your own monitor switches you to that workspace.
-- **Selecting a tile from another monitor** brings that workspace to the monitor you're on, swapping it with whatever was there.
-- **Selecting an empty tile** creates a fresh workspace and switches to it.
-- **Dragging a window** from one tile to another moves it to that workspace — this works across monitors too.
-- **Keyboard navigation** (arrow keys or `next`/`previous`) can land on any tile, including empty ones.
+Keyboard focus starts on the current tile and can land on any tile, including empty ones. Confirming selects the focused tile. See [Keyboard navigation](#keyboard-navigation).
+
+**Touchpad**
+
+Register a [gesture](#gestures) and swipe to open the overview progressively. Releasing past the halfway point commits; releasing before it cancels. Swiping again while it's open closes it on the hovered tile.
 
 ## Install
 
 ### hyprpm
 
 ```bash
-hyprpm add https://github.com/sandwichfarm/hyprexpo
+hyprpm add https://github.com/aarushth/hyprexpo
 hyprpm enable hyprexpo
-hyprpm reload
 ```
 
-The repository name in `hyprpm.toml` is `hyprexpo`, and the built plugin output is `hyprexpo.so`.
+Then have Hyprland load enabled plugins at startup from your `hyprland.lua`:
 
-### Build From Source
+```lua
+hl.on("hyprland.start", function()
+	hl.exec_cmd("hyprpm reload")
+end)
+```
 
-Install a C++23 compiler, `pkg-config`, Hyprland development headers, and these pkg-config packages:
+### Build from source
+
+You need a C++23 compiler, `pkg-config`, Hyprland's development headers, and these pkg-config packages:
 
 ```text
 hyprland pixman-1 libdrm pangocairo libinput libudev wayland-server xkbcommon lua5.4
 ```
 
-The build prefers the `lua5.4` pkg-config module and falls back to `lua` for
-distributions such as Fedora where `lua-devel` exposes the generic module name.
-
-Build with the Makefile:
+The build uses `lua5.4` if available and otherwise falls back to `lua`, which is the module name on distributions such as Fedora.
 
 ```bash
-git clone https://github.com/sandwichfarm/hyprexpo
+git clone https://github.com/aarushth/hyprexpo
 cd hyprexpo
 make all
 ```
 
-For day-to-day development, prefer a disposable nested Hyprland session. This
-matches Hyprland's plugin development guidance: build the plugin, load it by
-absolute path with `hyprctl plugin load`, then unload and load again after
-changes.
+Load the result from your `hyprland.lua`, using an absolute path:
+
+```lua
+hl.plugin.load("/absolute/path/to/hyprexpo.so")
+```
+
+Meson and CMake builds are also available:
 
 ```bash
-./scripts/run-nested.sh
+meson setup build && meson compile -C build
+cmake -S . -B build && cmake --build build
 ```
 
-`scripts/dev-watch.sh` rebuilds and relaunches that nested session automatically on source changes.
 
-If you already have a disposable Hyprland session running, build to a
-user-owned cache path and load or reload that `.so` directly:
+## Quick start
 
-```bash
-make dev-load
-make dev-reload
-```
-
-Only replace the hyprpm-managed copy when you intentionally want the installed
-plugin to point at this checkout's build:
-
-```bash
-make install
-hyprpm reload
-```
-
-If your distro or install path stores hyprpm artifacts under a root-owned cache,
-keep privilege at the command line instead of baking `sudo` into the Makefile:
-
-```bash
-sudo make install INSTALL_USER="$USER"
-hyprpm reload
-```
-
-Use `install` or `make install`, not plain `cp`, when replacing a loaded `.so`.
-Hyprland maps plugin files into the running process, and overwriting that file
-in place can corrupt the live mapping.
-
-Other build entry points:
-
-```bash
-meson setup build
-meson compile -C build
-```
-
-```bash
-cmake -S . -B build
-cmake --build build
-```
-
-Run the unit tests (pure logic, no Hyprland instance needed):
-
-```bash
-make test
-```
-
-### Nix
-
-Nix users should build HyprExpo through the Nix Hyprland plugin path instead of mixing a `hyprpm` artifact into a Nix-managed Hyprland session. This repository includes `default.nix`, which uses `hyprlandPlugins.mkHyprlandPlugin` so the plugin follows the Hyprland input supplied by the caller.
-
-Hyprland plugins are ABI-sensitive. Keep the plugin build and running Hyprland revision aligned.
-
-## Quick Config
-
-Add the plugin block to your Hyprland config:
-
-```ini
-plugin {
-    hyprexpo {
-        gaps_in = 5
-        gaps_out = 0
-        bg_col = rgb(111111)
-        gesture_distance = 200
-        cancel_key = escape
-        show_cursor = 1
-        show_pinned_windows = 0
-    }
-}
-```
-
-For `hyprland.lua`, use `hl.config()`:
+This is a complete setup: **Alt+Tab** opens the overview, further Tabs cycle through tiles, and **releasing Alt** switches to the focused tile, like a normal window switcher.
 
 ```lua
 hl.config({
-    plugin = {
-        hyprexpo = {
-            gaps_in = 5,
-            gaps_out = 0,
-            bg_col = "rgb(111111)",
-            gesture_distance = 200,
-            cancel_key = "escape",
-            show_cursor = 1,
-        },
-    },
+	plugin = {
+		hyprexpo = {
+			gaps_in = 3,
+			gaps_out = 3,
+			bg_col = "rgb(111111)",
+			border_width = 3,
+			-- Transparent, so the only visible border is the keyboard focus
+			border_color_current = "rgba(11111100)",
+			border_color_hover = "rgba(11111100)",
+			border_color_focus = "rgba(4B09F5ee) rgba(02C939ee) 45deg",
+		},
+	},
 })
+
+-- Open the overview
+hl.bind("ALT + TAB", function()
+	hl.plugin.hyprexpo.expo("toggle")
+end, { non_consuming = true })
+
+hl.bind("ALT + SHIFT + TAB", function()
+	hl.plugin.hyprexpo.expo("toggle")
+end, { non_consuming = true })
+
+-- Active only while the overview is open
+hl.define_submap("hyprexpo", function()
+	hl.bind("ALT + TAB", function()
+		hl.plugin.hyprexpo.kb_focus("next")
+	end, { non_consuming = true })
+	hl.bind("ALT + SHIFT + TAB", function()
+		hl.plugin.hyprexpo.kb_focus("previous")
+	end, { non_consuming = true })
+
+	hl.bind("ALT + h", function()
+		hl.plugin.hyprexpo.kb_focus("left")
+	end)
+	hl.bind("ALT + l", function()
+		hl.plugin.hyprexpo.kb_focus("right")
+	end)
+	hl.bind("ALT + k", function()
+		hl.plugin.hyprexpo.kb_focus("up")
+	end)
+	hl.bind("ALT + j", function()
+		hl.plugin.hyprexpo.kb_focus("down")
+	end)
+
+	hl.bind("return", function()
+		hl.plugin.hyprexpo.kb_confirm()
+	end)
+
+	-- Releasing Alt confirms the focused tile
+	hl.bind("ALT_L", function()
+		hl.plugin.hyprexpo.kb_confirm()
+	end, { release = true, submap_universal = true, ignore_mods = true, transparent = true })
+end)
 ```
 
-Add a dispatcher binding:
-
-```ini
-bind = SUPER, g, hyprexpo:expo, toggle
-```
-
-Or in Lua:
+Prefer a simple toggle? Bind it like any other action, and click a tile or use `return` to choose:
 
 ```lua
 hl.bind("SUPER + G", function()
-    hl.plugin.hyprexpo.expo("toggle")
+	hl.plugin.hyprexpo.expo("toggle")
 end)
 ```
 
-## Keyboard Navigation
+From a shell or script:
 
-Keyboard navigation is enabled by default (`keynav_enable = 1`). While the overview is open, HyprExpo activates a submap named `hyprexpo` and resets it when the overview closes. Bind the submap's keys yourself:
-
-```ini
-plugin {
-    hyprexpo {
-        keynav_enable = 1
-        keynav_wrap_h = 1
-        keynav_wrap_v = 1
-        keynav_reading_order = 0
-    }
-}
-
-submap = hyprexpo
-    bind = , left,     hyprexpo:kb_focus, left
-    bind = , right,    hyprexpo:kb_focus, right
-    bind = , up,       hyprexpo:kb_focus, up
-    bind = , down,     hyprexpo:kb_focus, down
-    bind = , tab,      hyprexpo:kb_focus, next
-    bind = SHIFT, tab, hyprexpo:kb_focus, previous
-    bind = , return,   hyprexpo:kb_confirm
-    bind = , escape,   hyprexpo:expo, cancel
-    bind = , 1,        hyprexpo:kb_selecti, 1
-    bind = , 2,        hyprexpo:kb_selecti, 2
-    bind = , 3,        hyprexpo:kb_selecti, 3
-    bind = , 4,        hyprexpo:kb_selecti, 4
-    bind = , 5,        hyprexpo:kb_selecti, 5
-    bind = , 6,        hyprexpo:kb_selecti, 6
-    bind = , 7,        hyprexpo:kb_selecti, 7
-    bind = , 8,        hyprexpo:kb_selecti, 8
-    bind = , 9,        hyprexpo:kb_selecti, 9
-    bind = , 0,        hyprexpo:kb_selecti, 10
-submap = reset
+```bash
+hyprctl eval 'hl.plugin.hyprexpo.expo("toggle")'
 ```
 
-For `hyprland.lua`, define the same submap in Lua instead of a `submap = hyprexpo` block in `hyprland.conf` (the two config systems don't share submaps):
+## Keyboard navigation
 
-```lua
-hl.define_submap("hyprexpo", function()
-    hl.bind("h",      function() hl.plugin.hyprexpo.kb_focus("left") end)
-    hl.bind("l",      function() hl.plugin.hyprexpo.kb_focus("right") end)
-    hl.bind("k",      function() hl.plugin.hyprexpo.kb_focus("up") end)
-    hl.bind("j",      function() hl.plugin.hyprexpo.kb_focus("down") end)
-    hl.bind("tab",       function() hl.plugin.hyprexpo.kb_focus("next") end)
-    hl.bind("SHIFT+tab", function() hl.plugin.hyprexpo.kb_focus("previous") end)
-    hl.bind("return", function() hl.plugin.hyprexpo.kb_confirm() end)
-    hl.bind("escape", function() hl.plugin.hyprexpo.expo("cancel") end)
-end)
-```
+While the overview is open, hyprexpo activates a submap named `hyprexpo`, which you define yourself with `hl.define_submap`, and leaves it on close. That's why the binds in [Quick start](#quick-start) only apply inside the overview. Closing always returns to the default submap, even if you opened the overview from a different one. Set `keynav_enable = 0` to stop hyprexpo entering the submap.
 
-`next`/`previous` always move through the grid in row-major reading order and always wrap (last tile of a row → first tile of the next row; last tile overall → first tile), regardless of `keynav_wrap_h`/`keynav_wrap_v`, which only affect the directional `left`/`right`/`up`/`down` moves. Every tile — including empty ones — is a valid keyboard focus target.
+**Moving focus**
 
-`cancel_key` (default `escape`) closes the overview without switching, independent of the submap. It also works from outside the submap. Use comma-separated key names for multiple cancel keys, or `none`/`off` to disable it:
+- `left`, `right`, `up` and `down` move across the grid and respect `keynav_wrap_h` and `keynav_wrap_v`.
+- `next` and `previous` step through tiles in reading order and always wrap, ignoring those options.
 
-```ini
-plugin {
-    hyprexpo {
-        cancel_key = escape, q
-    }
-}
-```
+**Keys handled before your binds**
 
-Bare `1`-`9` digit keys always select that workspace by ID while the overview is open, even without a submap bind.
+These work without any binding, and they reach hyprexpo first, so any bind you put on them in the submap won't fire.
 
-## Dispatchers
+- **Cancel keys:** `cancel_key` (default `escape`) closes the overview without switching.
+- **Digits `1`-`9`**, including the numpad and with any modifiers held: select the workspace with that number. If it isn't in the grid, the overview closes and Hyprland switches to that workspace anyway.
 
-Main dispatcher:
+The `0` key isn't handled this way, so you can bind it, for example to `kb_selectn(0)`, which selects workspace 10.
 
-```ini
-bind = SUPER, g, hyprexpo:expo, toggle
-```
-
-| argument | description |
-| --- | --- |
-| `toggle` | show overview if hidden, hide it if shown |
-| `cancel` | hide overview without switching workspaces |
-| `off`, `close`, `disable` | hide overview |
-| `select` | select the hovered workspace |
-| `bring` | move the top mapped window from the hovered workspace into the current workspace, without leaving your workspace |
-| `1`..`9` | select that workspace by ID |
-| anything else | opens the overview if it's closed; no-op if it's already open |
-
-Keyboard dispatchers, active while the overview is open:
-
-| dispatcher | argument | description |
-| --- | --- | --- |
-| `hyprexpo:kb_focus` | `left`, `right`, `up`, `down`, `next`, `previous` | move keyboard focus across tiles |
-| `hyprexpo:kb_confirm` | none | select the focused tile |
-| `hyprexpo:kb_selecti` | 1-based visible index | select by visible tile position |
-| `hyprexpo:kb_selectn` | workspace ID | select by workspace ID; `0` maps to workspace `10` |
-| `hyprexpo:kb_select` | token | select by token (`1`-`9`, `0`, then `a`-`z` by visible tile order) |
-| `hyprexpo:move_window` | `source target [address]` | move a window between 1-based visible tile indices; defaults to the top mapped window on the source tile if no address is given |
-
-Hyprland may briefly report invalid dispatcher messages during startup if binds are parsed before plugins are loaded. Those messages are cosmetic; the dispatchers work once the plugin is loaded.
-
-## Configuration Options
-
-Use the short key names inside a `plugin { hyprexpo { ... } }` block, or the fully qualified `plugin:hyprexpo:*` names elsewhere.
-
-### Behavior
-
-| key | type | description | default |
-| --- | --- | --- | --- |
-| `gaps_in` | int | spacing between tiles in pixels | `5` |
-| `gaps_out` | int | outer margin around the grid in pixels | `0` |
-| `bg_col` | color | grid background color | `0xFF111111` |
-| `gesture_distance` | int | swipe distance considered complete | `200` |
-| `cancel_key` | string | comma-separated key names that close overview without selecting; `none` or `off` disables | `escape` |
-| `show_cursor` | bool int | keep the cursor visible while overview is open | `1` |
-| `show_pinned_windows` | bool int | render pinned/PiP windows in workspace preview thumbnails; default `0` hides them from previews only | `0` |
-
-Pinned windows, including browser Picture-in-Picture windows, stay pinned and visible in normal Hyprland regardless of this setting. It only controls whether they additionally appear in every overview tile's thumbnail.
-
-### Keyboard Navigation
-
-| key | type | description | default |
-| --- | --- | --- | --- |
-| `keynav_enable` | bool int | enable keyboard navigation and the overview submap | `1` |
-| `keynav_wrap_h` | bool int | wrap horizontally at row edges (`left`/`right` only) | `1` |
-| `keynav_wrap_v` | bool int | wrap vertically at column edges (`up`/`down` only) | `1` |
-| `keynav_reading_order` | bool int | use row-major horizontal movement instead of spatial movement for `left`/`right` | `0` |
-
-### Tile Appearance
-
-| key | type | description | default |
-| --- | --- | --- | --- |
-| `tile_rounding` | int | corner radius in pixels for workspace previews | `0` |
-| `tile_rounding_power` | float | rounding curve exponent | `2.0` |
-| `tile_rounding_focus` | int | focused tile radius; `-1` inherits `tile_rounding` | `-1` |
-| `tile_rounding_current` | int | current tile radius; `-1` inherits `tile_rounding` | `-1` |
-| `tile_rounding_hover` | int | hovered tile radius; `-1` inherits `tile_rounding` | `-1` |
-| `border_width` | int | border thickness in pixels | `2` |
-| `border_color` | string | default border for non-highlighted tiles; solid color or gradient | empty |
-| `border_color_current` | string | current workspace tile border; solid color or gradient | `rgb(66ccff)` |
-| `border_color_focus` | string | keyboard-focused tile border; solid color or gradient | `rgb(ffcc66)` |
-| `border_color_hover` | string | pointer-hovered tile border; solid color or gradient | `rgb(aabbcc)` |
-| `border_grad_current` | string | deprecated fallback; use `border_color_current` | empty |
-| `border_grad_focus` | string | deprecated fallback; use `border_color_focus` | empty |
-| `border_grad_hover` | string | deprecated fallback; use `border_color_hover` | empty |
-| `border_style` | string | deprecated compatibility key; border style is auto-detected from the color format | `simple` |
-
-Solid values:
-
-```ini
-bg_col = rgb(111111)
-border_color_current = rgb(66ccff)
-```
-
-Gradient values:
-
-```ini
-border_color_current = rgba(33ccffee) rgba(00ff99ee) 45deg
-```
-
-### Drag-Drop Window Styling
-
-These options style the visual feedback shown while dragging a window between workspace previews: the under-pointer drag proxy, and, while the pointer is over a valid target tile, a positional landing proxy inside that tile. Empty border values inherit the focused tile border, so the default look is unchanged until you opt in.
-
-| key | type | description | default |
-| --- | --- | --- | --- |
-| `drag_drop_proxy_color` | color | translucent dragged-window proxy before the move threshold is crossed | `0x24EDB342` |
-| `drag_drop_proxy_active_color` | color | dragged-window proxy after movement is active | `0x3DEDB342` |
-| `drag_drop_proxy_border_color` | string | proxy border; solid color or gradient; empty inherits `border_color_focus` | empty |
-| `drag_drop_proxy_border_width` | int | proxy border width; `-1` inherits `max(2, border_width + 1)`, `0` disables | `-1` |
-| `drag_drop_proxy_rounding` | int | proxy corner radius in pixels; `-1` inherits the automatic focused-tile rounding | `-1` |
-| `drag_drop_source_border_color` | string | source workspace border while a drag/drop move is active; empty inherits focus border | empty |
-| `drag_drop_source_border_width` | int | source workspace border width while dragging; `-1` inherits `border_width`, `0` disables | `-1` |
-
-```ini
-plugin {
-    hyprexpo {
-        drag_drop_proxy_color = rgba(66ccff22)
-        drag_drop_proxy_active_color = rgba(66ccff44)
-        drag_drop_proxy_border_color = rgba(66ccffee) rgba(ffcc66ee) 45deg
-        drag_drop_source_border_color = rgb(ffcc66)
-        drag_drop_proxy_border_width = 3
-        drag_drop_proxy_rounding = 10
-    }
-}
-```
-
-### Safe Failure Behavior
-
-Invalid border colors, gradient values, and bool-int options are expected to fail safely: the plugin logs the invalid value and falls back to a default instead of crashing Hyprland during render.
+Note that closing with `expo("toggle")` stays on the current workspace even if you've moved keyboard focus. Use `kb_confirm` to go to the focused tile.
 
 ## Lua API
 
-HyprExpo exposes helpers under `hl.plugin.hyprexpo` when Hyprland is using Lua config support:
+Everything is called through `hl.plugin.hyprexpo`, which holds functions only. Options go in `hl.config()`, as in [Quick start](#quick-start).
 
-```lua
-hl.plugin.hyprexpo.expo("toggle")
-hl.plugin.hyprexpo.expo("cancel")
-hl.plugin.hyprexpo.kb_focus("left")
-hl.plugin.hyprexpo.kb_focus("next")
-hl.plugin.hyprexpo.kb_confirm()
-hl.plugin.hyprexpo.kb_selecti(1)
-hl.plugin.hyprexpo.kb_selectn(1)
-hl.plugin.hyprexpo.kb_select("1")
-```
+A failed call raises a Lua error. Arguments are checked strictly: fractional numbers, booleans and partial numeric strings are rejected, not coerced.
 
-`hl.plugin.hyprexpo` is the Lua helper namespace for dispatchers and gestures; it is not the configuration block. Configure options with `hl.config()` and a nested `plugin.hyprexpo` table, as shown in [Quick Config](#quick-config).
+### `expo(arg)`
 
-Arguments are validated strictly — fractional numbers, booleans, tables where strings are expected, and partial numeric strings are rejected instead of silently coerced:
+`arg` is case-insensitive and defaults to `"toggle"`.
 
-| function | accepted arguments |
-| --- | --- |
-| `expo` | string, defaulting to `"toggle"` when omitted |
-| `kb_focus` | string |
-| `kb_confirm` | none |
-| `kb_selecti` | Lua integer or exact integer string |
-| `kb_selectn` | Lua integer or exact integer string |
-| `kb_select` | string |
+| argument | when closed | when open |
+| --- | --- | --- |
+| `"toggle"` | open | close, staying on the current workspace |
+| `"cancel"` | nothing | close, staying on the current workspace |
+| `"off"`, `"close"`, `"disable"` | nothing | close, staying on the current workspace |
+| `"select"` | nothing | select the hovered tile |
+| `"bring"` | nothing | move the top window of the hovered tile to your current workspace, then close without switching |
+| `"1"` to `"9"` | switch to that workspace | select that workspace, or close and switch to it if it isn't in the grid |
+| anything else | open | nothing |
+
+### Selection and focus
+
+These do nothing while the overview is closed.
+
+| function | argument | description |
+| --- | --- | --- |
+| `kb_focus(dir)` | `"left"`, `"right"`, `"up"`, `"down"`, `"next"`, `"previous"` | Move keyboard focus |
+| `kb_confirm()` | none | Select the focused tile |
+| `kb_selectn(n)` | integer or integer string | Select workspace number `n`; `0` means 10. Does nothing if it isn't in the grid |
+| `kb_selecti(i)` | integer or integer string, 1 or higher | Select the `i`th workspace tile, skipping empty tiles |
+| `kb_select(token)` | string | Like `kb_selecti`, using a single-character token: `1`-`9`, then `0`, then `a`-`z` for tiles 11 onward |
 
 ### Gestures
 
 ```lua
-hl.plugin.hyprexpo.gesture({
-    fingers = 4,
-    direction = "up",
-    action = "expo",
-})
+if hl.plugin.hyprexpo then
+	hl.plugin.hyprexpo.gesture({ fingers = 4, direction = "up" })
+end
 ```
+
+Put this at the top level of your config, not in a `hyprland.start` handler. The plugin usually isn't loaded when your config first runs, so the check skips the call that time. hyprexpo then reloads your config when it loads, and the gesture registers.
 
 | field | type | required | description |
 | --- | --- | --- | --- |
-| `fingers` | integer | yes | number of fingers |
-| `direction` | string | yes | swipe direction |
-| `action` | string | no | `expo` or `unset`; defaults to `expo` |
-| `mods` | string | no | modifier expression passed to Hyprland |
-| `scale` | number | no | gesture scale; defaults to `1.0` |
-| `disable_inhibit` | boolean | no | whether to bypass inhibit handling |
+| `fingers` | integer | yes | 2 to 9 |
+| `direction` | string | yes | A Hyprland gesture direction such as `up`, `down`, `left`, `right`, `vertical`, `horizontal` or `swipe` |
+| `action` | string | no | `expo` (default), or `unset` to remove a matching gesture |
+| `mods` | string | no | Modifier keys that must be held |
+| `scale` | number | no | Gesture speed multiplier, clamped to 0.1-10; default `1.0` |
+| `disable_inhibit` | boolean | no | Passed to Hyprland's gesture handling; default `false` |
 
-## Compatibility
+## Configuration
 
-Hyprland checks plugin API compatibility when loading a plugin. If HyprExpo was built against an incompatible Hyprland revision, loading fails with a visible API/hash mismatch instead of silently running against the wrong ABI — keep the plugin build and the running Hyprland revision aligned.
+All options go under `plugin.hyprexpo` in `hl.config()`. Options marked "0 or 1" are off at `0` and on at `1`.
 
-Release builds attach `release-provenance.txt` next to `hyprexpo.so`, recording `hyprctl version`, `pkg-config --modversion hyprland`, the Lua pkg-config version, the compiler version, and `ldd -r hyprexpo.so`.
+### General
+
+| option | type | default | description |
+| --- | --- | --- | --- |
+| `gaps_in` | int | `5` | Space between tiles, in pixels. Read when the overview opens |
+| `gaps_out` | int | `0` | Margin around the grid, in pixels |
+| `bg_col` | color | `0xFF111111` | Background behind the tiles; alpha is ignored. Read when the overview opens |
+| `gesture_distance` | int | `200` | Swipe distance for a complete open or close |
+| `cancel_key` | string | `escape` | Comma-separated key names that close without switching, such as `"escape, q"`. Use `none`, `off`, `disable` or an empty value to turn this off |
+| `show_cursor` | 0 or 1 | `1` | Force the cursor visible while the overview is open. At `0` hyprexpo leaves the cursor alone |
+| `show_pinned_windows` | 0 or 1 | `0` | Include pinned windows, such as browser Picture-in-Picture, in tile previews. This only affects previews; pinned windows behave normally outside the overview |
+
+### Keyboard
+
+| option | type | default | description |
+| --- | --- | --- | --- |
+| `keynav_enable` | 0 or 1 | `1` | Enter the `hyprexpo` submap while the overview is open |
+| `keynav_wrap_h` | 0 or 1 | `1` | `left` and `right` wrap at row edges |
+| `keynav_wrap_v` | 0 or 1 | `1` | `up` and `down` wrap at column edges |
+| `keynav_reading_order` | 0 or 1 | `0` | `left` and `right` continue onto the adjacent row instead of staying in the same one. They wrap at the ends of the grid only if both wrap options are on |
+
+### Tile appearance
+
+| option | type | default | description |
+| --- | --- | --- | --- |
+| `tile_rounding` | int | `0` | Corner radius in pixels |
+| `tile_rounding_power` | float | `2.0` | Rounding curve exponent |
+| `tile_rounding_focus` | int | `-1` | Radius of the keyboard-focused tile; `-1` uses `tile_rounding` |
+| `tile_rounding_current` | int | `-1` | Radius of the current workspace's tile; `-1` uses `tile_rounding` |
+| `tile_rounding_hover` | int | `-1` | Radius of the hovered tile; `-1` uses `tile_rounding` |
+| `border_width` | int | `2` | Border thickness in pixels; the minimum is 1 |
+| `border_color_current` | string | `rgb(66ccff)` | Border of the current workspace's tile |
+| `border_color_focus` | string | `rgb(ffcc66)` | Border of the keyboard-focused tile |
+| `border_color_hover` | string | `rgb(aabbcc)` | Border of the hovered tile |
+
+Only highlighted tiles get a border. When one tile is in several states, the priority is focus, then current, then hover. Focus starts on the current tile, so `border_color_current` doesn't show until focus moves away.
+
+Border colors take a solid color or a two-color gradient:
+
+```lua
+border_color_current = "rgb(66ccff)",
+border_color_focus = "rgba(33ccffee) rgba(00ff99ee) 45deg",
+```
+
+To hide a border, use a fully transparent color, as in [Quick start](#quick-start). `border_width = 0` still draws a 1px border.
+
+### Drag and drop
+
+While you drag a window, a proxy follows the pointer. Over another tile, a second proxy shows where the window will land.
+
+| option | type | default | description |
+| --- | --- | --- | --- |
+| `drag_drop_proxy_color` | color | `0x24EDB342` | Proxy fill before the 12px drag threshold |
+| `drag_drop_proxy_active_color` | color | `0x3DEDB342` | Proxy fill once dragging, and the landing proxy's fill |
+| `drag_drop_proxy_border_color` | string | empty | Proxy border, solid or gradient; empty uses `border_color_focus` |
+| `drag_drop_proxy_border_width` | int | `-1` | `-1` uses `border_width + 1` with a minimum of 2; `0` disables |
+| `drag_drop_proxy_rounding` | int | `-1` | Proxy corner radius in pixels; `-1` follows the focused tile's rounding |
+| `drag_drop_source_border_color` | string | empty | Border of the tile being dragged from; empty uses `border_color_focus` |
+| `drag_drop_source_border_width` | int | `-1` | `-1` uses `border_width`; `0` disables |
+
+### Legacy options
+
+These are still accepted so old configs load, but shouldn't be used in new ones.
+
+| option | status |
+| --- | --- |
+| `border_grad_current`, `border_grad_focus`, `border_grad_hover` | Used only when the matching `border_color_*` is empty. `border_color_*` accepts gradients directly |
+| `border_color` | No effect |
+| `border_style` | No effect; solid or gradient is detected from the color value |
 
 ## Troubleshooting
 
-**Plugin load fails with an API or hash mismatch** — rebuild HyprExpo against the same Hyprland revision that is running, then reload the plugin.
+**The plugin won't load, with an API or hash mismatch.** The plugin must be built against the exact Hyprland revision you're running. Rebuild it and load it again. If `pkg-config --modversion hyprland` doesn't print your running version, an old `hyprland.pc` is being picked up first. Remove it or point `PKG_CONFIG_PATH` at the right headers.
 
-**Plugin load fails because dependencies are missing** — install the build dependencies listed above and rebuild. Current linked runtime dependencies include Lua (`lua5.4` or `lua` through pkg-config), `pangocairo`, and `xkbcommon`.
+**Errors appear at startup, then go away.** Plugins usually load after your config first runs. hyprexpo reloads the config as soon as it loads, so anything that depends on it takes effect at that point.
 
-**Invalid config values** — invalid border colors or bool-int options are logged and fall back safely; check the format against the [Configuration Options](#configuration-options) tables above.
+**Keyboard binds do nothing while the overview is open.** Check that `hl.define_submap("hyprexpo", ...)` is in your config and that `keynav_enable` is on.
 
-**Replacing a loaded plugin crashes Hyprland** — for development, prefer `./scripts/run-nested.sh` or `make dev-reload` so Hyprland loads a fresh user-owned build by absolute path. If you intentionally replace an installed plugin file, use `make install` or `install`, not `cp` — Hyprland maps the plugin into the running process, and overwriting the file in place can corrupt the live mapping.
+**A border doesn't appear.** An invalid solid color is logged to the Hyprland log and that border isn't drawn. An invalid gradient isn't drawn either, and isn't logged. Check the value against the formats in [Tile appearance](#tile-appearance).
+
+**Hyprland crashed after replacing the plugin file.** Hyprland maps the plugin into its running process, so overwriting the file in place corrupts it. Use `make install` or `install`, never `cp`.
 
 ## Development
 
-Unit tests cover pure logic (grid sizing, tile hit-testing, color/gradient parsing, drop-intent geometry) and don't require a running Hyprland instance:
-
 ```bash
-make test
+make test         # unit tests; no running Hyprland needed
+make dev-load     # build to ~/.cache/hyprexpo and load it into the running session
+make dev-reload   # rebuild, unload and load again
+make install      # replace the hyprpm-managed copy, then run hyprpm reload
 ```
 
-For interactive testing, `./scripts/run-nested.sh` launches a disposable nested Hyprland session with a fresh user-owned build. Useful binds in that session:
+`make install` may need `sudo make install INSTALL_USER="$USER"` where hyprpm's cache is owned by root.
 
-- `F10` for overview
-- `SUPER+Return` for a terminal
-- `SUPER+1..9` for workspaces
-- `SUPER+SHIFT+1..9` to move a window
-- `SUPER+Q` to close a window
-- `SUPER+SHIFT+Q` to exit
+`scripts/run-nested.sh` and `scripts/dev-watch.sh` generate a hyprlang config for a nested session, so they need updating to Lua before they'll work on Hyprland 0.57. Until then, test in a session you don't mind losing.
 
-`./scripts/dev-watch.sh` rebuilds and relaunches that session automatically on source changes.
+Before a release, check at least:
 
-Before publishing a release, exercise at minimum: toggling the overview, cancelling with `cancel_key`, keyboard focus + confirm (including `next`/`previous` and landing on an empty tile), pointer/touch selection, drag-and-drop between two tiles on the same monitor and across two different monitors, the pinned-window preview toggle, and a Lua gesture registration.
-
-## Releasing
+- opening, closing and cancelling
+- keyboard focus and confirm, including landing on an empty tile
+- digit selection
+- clicking and touch selection
+- dragging a window between tiles on one monitor, across monitors, and onto an empty tile
+- selecting a workspace from another monitor
+- the pinned window preview option
+- gesture registration
 
 See [RELEASING.md](RELEASING.md) for how versions are cut and published.
+
+## Credits
+
+This is a fork of [sandwichfarm/hyprexpo](https://github.com/sandwichfarm/hyprexpo) (formerly HyprExpo+), which continued the original hyprexpo after it was [retired](https://github.com/hyprwm/hyprland-plugins/pull/663) from [hyprland-plugins](https://github.com/hyprwm/hyprland-plugins). Thanks to everyone who worked on both.
+
+Bugs and suggestions are welcome in the [issue tracker](https://github.com/aarushth/hyprexpo/issues). See [LICENSE](LICENSE) for license terms.
